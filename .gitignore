@@ -1,0 +1,38 @@
+# Maven
+target/
+.mvn/wrapper/maven-wrapper.jar
+pom.xml.versionsBackup
+dependency-reduced-pom.xml
+
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+bin/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets and local config
+.env
+*.env.local
+
+# Logs
+*.log
+logs/
+
+# Runtime staging directories for downloaded batch files
+staging/
+**/staging/
+
+# Node and Newman output
+node_modules/
+newman/
