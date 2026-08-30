@@ -53,6 +53,10 @@
     <sonar.coverage.exclusions>**/*Application.java</sonar.coverage.exclusions>
   </properties>
 
+  <modules>
+    <module>remit-common</module>
+  </modules>
+
   <dependencyManagement>
     <dependencies>
       <dependency>
