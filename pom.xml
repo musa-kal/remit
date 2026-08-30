@@ -43,6 +43,7 @@
     <!-- NFR-06: line coverage per module must stay at or above 80%. -->
     <jacoco.line.coverage.minimum>0.80</jacoco.line.coverage.minimum>
     <sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
+    <dependency-check-maven.version>12.2.2</dependency-check-maven.version>
 
     <!-- SonarQube analysis (run with `mvn sonar:sonar`; host and token come from the CI env). -->
     <sonar.projectKey>remit</sonar.projectKey>
@@ -205,6 +206,20 @@
           <artifactId>sonar-maven-plugin</artifactId>
           <version>${sonar-maven-plugin.version}</version>
         </plugin>
+        <!-- NFR-07: dependency vulnerability report only; failBuildOnCVSS is deliberately unset. -->
+        <plugin>
+          <groupId>org.owasp</groupId>
+          <artifactId>dependency-check-maven</artifactId>
+          <version>${dependency-check-maven.version}</version>
+          <configuration>
+            <formats>
+              <format>HTML</format>
+              <format>JSON</format>
+            </formats>
+            <skipTestScope>true</skipTestScope>
+            <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+          </configuration>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -227,4 +242,28 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!-- Manual dependency scan: `mvn -Powasp verify` (first run downloads the NVD database). -->
+    <profile>
+      <id>owasp</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.owasp</groupId>
+            <artifactId>dependency-check-maven</artifactId>
+            <executions>
+              <execution>
+                <id>dependency-check</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>check</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>
