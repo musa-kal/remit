@@ -35,6 +35,10 @@
 
     <!-- Test library versions: pinned to the versions the Boot BOM ships so all modules agree. -->
     <testcontainers.version>1.21.4</testcontainers.version>
+
+    <!-- Build quality plugins -->
+    <spotless-maven-plugin.version>3.10.3</spotless-maven-plugin.version>
+    <google-java-format.version>1.36.1</google-java-format.version>
   </properties>
 
   <dependencyManagement>
@@ -106,6 +110,32 @@
             </execution>
           </executions>
         </plugin>
+        <!-- Formatting gate: `mvn spotless:apply` fixes, `verify` fails on unformatted code. -->
+        <plugin>
+          <groupId>com.diffplug.spotless</groupId>
+          <artifactId>spotless-maven-plugin</artifactId>
+          <version>${spotless-maven-plugin.version}</version>
+          <configuration>
+            <java>
+              <googleJavaFormat>
+                <version>${google-java-format.version}</version>
+                <style>GOOGLE</style>
+              </googleJavaFormat>
+              <removeUnusedImports/>
+              <trimTrailingWhitespace/>
+              <endWithNewline/>
+            </java>
+          </configuration>
+          <executions>
+            <execution>
+              <id>spotless-check</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>check</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -117,6 +147,10 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
       </plugin>
     </plugins>
   </build>
