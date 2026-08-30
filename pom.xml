@@ -42,6 +42,14 @@
     <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
     <!-- NFR-06: line coverage per module must stay at or above 80%. -->
     <jacoco.line.coverage.minimum>0.80</jacoco.line.coverage.minimum>
+    <sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
+
+    <!-- SonarQube analysis (run with `mvn sonar:sonar`; host and token come from the CI env). -->
+    <sonar.projectKey>remit</sonar.projectKey>
+    <sonar.projectName>Remit</sonar.projectName>
+    <sonar.java.source>17</sonar.java.source>
+    <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+    <sonar.coverage.exclusions>**/*Application.java</sonar.coverage.exclusions>
   </properties>
 
   <dependencyManagement>
@@ -191,6 +199,11 @@
               </configuration>
             </execution>
           </executions>
+        </plugin>
+        <plugin>
+          <groupId>org.sonarsource.scanner.maven</groupId>
+          <artifactId>sonar-maven-plugin</artifactId>
+          <version>${sonar-maven-plugin.version}</version>
         </plugin>
       </plugins>
     </pluginManagement>
