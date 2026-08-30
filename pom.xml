@@ -39,6 +39,9 @@
     <!-- Build quality plugins -->
     <spotless-maven-plugin.version>3.10.3</spotless-maven-plugin.version>
     <google-java-format.version>1.36.1</google-java-format.version>
+    <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+    <!-- NFR-06: line coverage per module must stay at or above 80%. -->
+    <jacoco.line.coverage.minimum>0.80</jacoco.line.coverage.minimum>
   </properties>
 
   <dependencyManagement>
@@ -136,6 +139,59 @@
             </execution>
           </executions>
         </plugin>
+        <!--
+          Coverage gate. prepare-agent sets argLine for both surefire and failsafe, so unit and
+          integration tests append to the same jacoco.exec. Spring Boot main classes are excluded
+          because they only call SpringApplication.run. A module with no measurable classes yields
+          no coverage data and passes the check; the 0.80 minimum applies as soon as code exists.
+        -->
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <version>${jacoco-maven-plugin.version}</version>
+          <configuration>
+            <excludes>
+              <exclude>**/*Application.class</exclude>
+            </excludes>
+          </configuration>
+          <executions>
+            <execution>
+              <id>prepare-agent</id>
+              <goals>
+                <goal>prepare-agent</goal>
+              </goals>
+            </execution>
+            <execution>
+              <id>report</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>report</goal>
+              </goals>
+            </execution>
+            <execution>
+              <id>check</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>check</goal>
+              </goals>
+              <configuration>
+                <haltOnFailure>true</haltOnFailure>
+                <rules>
+                  <rule>
+                    <element>BUNDLE</element>
+                    <limits>
+                      <limit>
+                        <counter>LINE</counter>
+                        <value>COVEREDRATIO</value>
+                        <minimum>${jacoco.line.coverage.minimum}</minimum>
+                      </limit>
+                    </limits>
+                  </rule>
+                </rules>
+              </configuration>
+            </execution>
+          </executions>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -151,6 +207,10 @@
       <plugin>
         <groupId>com.diffplug.spotless</groupId>
         <artifactId>spotless-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
       </plugin>
     </plugins>
   </build>
