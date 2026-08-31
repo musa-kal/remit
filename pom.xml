@@ -60,6 +60,7 @@
     <module>remit-common</module>
     <module>intake-service</module>
     <module>routing-service</module>
+    <module>api-service</module>
   </modules>
 
   <dependencyManagement>
