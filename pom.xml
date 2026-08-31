@@ -59,6 +59,7 @@
   <modules>
     <module>remit-common</module>
     <module>intake-service</module>
+    <module>routing-service</module>
   </modules>
 
   <dependencyManagement>
