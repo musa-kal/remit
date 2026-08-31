@@ -34,3 +34,43 @@ Remit is a payment file gateway. Clients drop CSV payment batch files on an SFTP
 ```
 
 Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_api`) and never reads another service's data; everything crosses service boundaries as a Kafka event. See [ADR 0001](docs/decisions/0001-service-boundaries.md).
+
+## Stack
+
+- Java 17, Spring Boot 3 (3.5.x), Maven multi-module build
+- Spring Web, Spring Security (JWT, role-based endpoints)
+- Spring Batch for file ingestion
+- Spring Data JPA / Hibernate on MySQL 8, Flyway migrations
+- Apache Kafka 3 (KRaft) with Spring Kafka
+- MongoDB 7 for the audit trail
+- SFTP (atmoz/sftp) as the file drop zone
+- Docker and Docker Compose, Kubernetes manifests (kustomize)
+- Bash ops scripts
+- Jenkins pipeline with JUnit, Postman/Newman and SonarQube
+- JUnit 5, Mockito, AssertJ, Testcontainers; JaCoCo coverage gate and Spotless (google-java-format)
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `remit-common/` | Shared event records, enums, topic names, masking utilities |
+| `intake-service/` | SFTP polling and the Spring Batch ingestion job |
+| `routing-service/` | Idempotent Kafka consumer and channel routing |
+| `api-service/` | Operator REST API, security, read model, audit writer |
+| `docs/decisions/` | Architecture decision records |
+
+## Build
+
+Requires JDK 17. The Maven wrapper downloads Maven 3.9.9 on first use.
+
+```bash
+./mvnw -B verify          # compile, unit + integration tests, Spotless check, JaCoCo gate
+./mvnw -B spotless:apply  # reformat Java sources with google-java-format
+./mvnw -B -Powasp verify  # optional OWASP dependency report (target/dependency-check-report.html)
+```
+
+The JaCoCo check fails any module whose line coverage drops below 80%.
+
+## Quick start
+
+Coming in a later milestone.
