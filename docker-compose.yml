@@ -1,0 +1,41 @@
+# Remit local stack. Copy .env.example to .env first, then: docker compose up -d
+# Optional tools (Kafka UI): docker compose --profile tools up -d
+
+name: remit
+
+services:
+  # --- Infrastructure ---------------------------------------------------------
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      TZ: UTC
+    ports:
+      - "${REMIT_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - remit
+    healthcheck:
+      # TCP on 127.0.0.1 only answers once the init scripts are done, because the
+      # temporary bootstrap server the image starts during init has networking disabled.
+      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # --- Application services (added in M5) ---------------------------------------
+  # intake-service: depends on mysql, kafka-init (completed) and sftp.
+  # routing-service: depends on mysql and kafka-init (completed).
+  # api-service: depends on mysql, mongo and kafka-init (completed).
+
+networks:
+  remit:
+    name: remit
+
+volumes:
+  mysql-data:
+  mongo-data:
+  kafka-data:
