@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: api-service
+
+---
+# Test profile: activated by @ActiveProfiles("test") in the test suite.
+spring:
+  config:
+    activate:
+      on-profile: test
+  main:
+    banner-mode: off
+
+logging:
+  level:
+    root: WARN
+    ca.musakaleem.remit: INFO
