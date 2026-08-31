@@ -74,3 +74,16 @@ The JaCoCo check fails any module whose line coverage drops below 80%.
 ## Quick start
 
 Coming in a later milestone.
+
+## Status
+
+- [ ] M0 Scaffold: parent POM, four modules, Spotless and JaCoCo configured
+- [ ] M1 Local infra: MySQL (3 schemas), MongoDB, Kafka and topics, SFTP via Docker Compose
+- [ ] M2 Common + intake: event records, masking and idempotency utilities, Spring Batch intake
+- [ ] M3 Routing: idempotent consumer, retries, dead-letter topic
+- [ ] M4 API + security + audit: REST endpoints, JWT and roles, MongoDB audit trail, DLT replay
+- [ ] M5 Containers + E2E: Dockerfiles, full compose stack, smoke test, measured throughput
+- [ ] M6 Postman: collection and environments, Newman run
+- [ ] M7 CI: Jenkins and SonarQube, quality gate
+- [ ] M8 Kubernetes + scripts: kustomize base and local overlay, ops scripts
+- [ ] M9 Docs: runbook, architecture notes, ADRs
