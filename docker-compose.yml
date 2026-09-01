@@ -98,6 +98,24 @@ services:
       retries: 20
       start_period: 20s
 
+  # One-shot job: creates all topics with 3 partitions, then exits 0.
+  # App services should depend on it with condition: service_completed_successfully.
+  kafka-init:
+    image: apache/kafka:3.9.2
+    entrypoint: ["bash", "/opt/remit/create-topics.sh"]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      TOPIC_PARTITIONS: 3
+      TOPIC_REPLICATION_FACTOR: 1
+    volumes:
+      - ./docker/kafka/create-topics.sh:/opt/remit/create-topics.sh:ro
+    networks:
+      - remit
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+
   # --- Application services (added in M5) ---------------------------------------
   # intake-service: depends on mysql, kafka-init (completed) and sftp.
   # routing-service: depends on mysql and kafka-init (completed).
