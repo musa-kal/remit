@@ -32,6 +32,31 @@ services:
       retries: 30
       start_period: 20s
 
+  mongo:
+    image: mongo:7.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
+    ports:
+      - "${REMIT_MONGO_PORT:-27018}:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - remit
+    healthcheck:
+      # Connects via the container hostname, not localhost: the temporary server the image
+      # runs during init listens on 127.0.0.1 only, so this passes only once the real server is up.
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --host "$$(hostname)"
+          -u "$$MONGO_INITDB_ROOT_USERNAME" -p "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
+          --eval 'quit(db.adminCommand({ ping: 1 }).ok === 1 ? 0 : 1)'
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
   # --- Application services (added in M5) ---------------------------------------
   # intake-service: depends on mysql, kafka-init (completed) and sftp.
   # routing-service: depends on mysql and kafka-init (completed).
