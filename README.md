@@ -73,7 +73,34 @@ The JaCoCo check fails any module whose line coverage drops below 80%.
 
 ## Quick start
 
-Coming in a later milestone.
+Prerequisites: Docker with Compose v2 and JDK 17. The application services join the compose stack in a later milestone; today compose runs the infrastructure they need.
+
+```bash
+cp .env.example .env        # then replace every change-me value
+docker compose up -d        # MySQL, MongoDB, Kafka (+ topics), SFTP
+docker compose ps           # four services healthy, kafka-init "Exited (0)"
+docker compose --profile tools up -d kafka-ui   # optional Kafka UI on http://localhost:8090
+docker compose down -v      # stop everything and delete all data volumes
+```
+
+From empty volumes with images already pulled, the stack reached all-healthy in 19 s (measured on Windows 11 with Docker Desktop).
+
+### Local infrastructure
+
+| Service | Host address | What it provides |
+|---|---|---|
+| `mysql` (8.4) | `localhost:3307` | Schemas `remit_intake`, `remit_routing`, `remit_api`; users of the same names, each granted only on its own schema |
+| `mongo` (7.0) | `localhost:27018` | Database `remit_audit` with collection `audit_events` and its indexes; the app user can insert and read but not update or delete |
+| `kafka` (3.9, KRaft) | `localhost:29092` (host), `kafka:9092` (compose network) | Single broker, topic auto-creation disabled |
+| `kafka-init` | none | Creates the eight `payments.*` topics with 3 partitions, then exits 0 |
+| `sftp` (atmoz/sftp) | `localhost:2222` | User `REMIT_SFTP_USER` with `inbound`, `processing`, `processed`, `error` |
+| `kafka-ui` (tools profile) | `localhost:8090` | Browse topics and messages |
+
+Notes:
+
+- MySQL and MongoDB publish on 3307 and 27018 so they do not clash with native installs; change `REMIT_MYSQL_PORT` / `REMIT_MONGO_PORT` in `.env` if needed.
+- The init scripts in `docker/` run only when a data volume is empty. After changing a password in `.env`, recreate with `docker compose down -v`.
+- The SFTP host key is regenerated whenever the container is recreated, so local clients should not pin it.
 
 ## Status
 
