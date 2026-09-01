@@ -37,21 +37,26 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
+      # Read by docker/mongo/init.js on first start.
+      REMIT_MONGO_USER: ${REMIT_MONGO_USER:-remit_audit}
+      REMIT_MONGO_PASSWORD: ${REMIT_MONGO_PASSWORD:?set REMIT_MONGO_PASSWORD in .env}
     ports:
       - "${REMIT_MONGO_PORT:-27018}:27017"
     volumes:
       - mongo-data:/data/db
+      - ./docker/mongo/init.js:/docker-entrypoint-initdb.d/01-init.js:ro
     networks:
       - remit
     healthcheck:
       # Connects via the container hostname, not localhost: the temporary server the image
       # runs during init listens on 127.0.0.1 only, so this passes only once the real server is up.
+      # It also requires the four audit_events indexes (_id plus three) that init.js creates.
       test:
         - CMD-SHELL
         - >-
           mongosh --quiet --host "$$(hostname)"
           -u "$$MONGO_INITDB_ROOT_USERNAME" -p "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
-          --eval 'quit(db.adminCommand({ ping: 1 }).ok === 1 ? 0 : 1)'
+          --eval 'quit(db.getSiblingDB("remit_audit").audit_events.getIndexes().length === 4 ? 0 : 1)'
       interval: 5s
       timeout: 10s
       retries: 30
