@@ -139,6 +139,22 @@ services:
       retries: 20
       start_period: 5s
 
+  # --- Optional tools (docker compose --profile tools up -d) ---------------------
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    profiles: ["tools"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: remit-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "${KAFKA_UI_PORT:-8090}:8080"
+    networks:
+      - remit
+    depends_on:
+      kafka:
+        condition: service_healthy
+
   # --- Application services (added in M5) ---------------------------------------
   # intake-service: depends on mysql, kafka-init (completed) and sftp.
   # routing-service: depends on mysql and kafka-init (completed).
