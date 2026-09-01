@@ -11,11 +11,16 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
       TZ: UTC
+      # Read by docker/mysql/init-users.sh on first start.
+      REMIT_INTAKE_DB_PASSWORD: ${REMIT_INTAKE_DB_PASSWORD:?set REMIT_INTAKE_DB_PASSWORD in .env}
+      REMIT_ROUTING_DB_PASSWORD: ${REMIT_ROUTING_DB_PASSWORD:?set REMIT_ROUTING_DB_PASSWORD in .env}
+      REMIT_API_DB_PASSWORD: ${REMIT_API_DB_PASSWORD:?set REMIT_API_DB_PASSWORD in .env}
     ports:
       - "${REMIT_MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
       - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./docker/mysql/init-users.sh:/docker-entrypoint-initdb.d/02-init-users.sh:ro
     networks:
       - remit
     healthcheck:
