@@ -57,6 +57,8 @@ Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_
 | `intake-service/` | SFTP polling and the Spring Batch ingestion job |
 | `routing-service/` | Idempotent Kafka consumer and channel routing |
 | `api-service/` | Operator REST API, security, read model, audit writer |
+| `docker/` | Init scripts for MySQL, MongoDB and Kafka topics used by compose |
+| `docker-compose.yml` | Local infrastructure stack |
 | `docs/decisions/` | Architecture decision records |
 
 ## Build
