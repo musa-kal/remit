@@ -116,6 +116,29 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # SFTP drop zone. Clients upload to /inbound; intake-service moves files through
+  # /processing to /processed or /error. Password auth, chrooted to the user's home.
+  sftp:
+    image: atmoz/sftp:alpine
+    environment:
+      # Format user:password:uid:gid:dirs (dirs are created inside the chrooted home).
+      SFTP_USERS: "${REMIT_SFTP_USER:-remit}:${REMIT_SFTP_PASSWORD:?set REMIT_SFTP_PASSWORD in .env}:1001:1001:inbound,processing,processed,error"
+      REMIT_SFTP_USER: ${REMIT_SFTP_USER:-remit}
+    ports:
+      - "${REMIT_SFTP_PORT:-2222}:22"
+    volumes:
+      - sftp-data:/home/${REMIT_SFTP_USER:-remit}
+    networks:
+      - remit
+    healthcheck:
+      # Healthy once the user's directories exist and sshd is listening on port 22 (0x0016).
+      # Reads /proc/net/tcp instead of opening a connection, which would log a preauth disconnect.
+      test: ["CMD-SHELL", "test -d \"/home/$${REMIT_SFTP_USER}/error\" && grep -qE ':0016 [0-9A-F]{8}:0000 0A' /proc/net/tcp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
   # --- Application services (added in M5) ---------------------------------------
   # intake-service: depends on mysql, kafka-init (completed) and sftp.
   # routing-service: depends on mysql and kafka-init (completed).
@@ -129,3 +152,4 @@ volumes:
   mysql-data:
   mongo-data:
   kafka-data:
+  sftp-data:
