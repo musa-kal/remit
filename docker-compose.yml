@@ -155,10 +155,17 @@ services:
       kafka:
         condition: service_healthy
 
-  # --- Application services (added in M5) ---------------------------------------
-  # intake-service: depends on mysql, kafka-init (completed) and sftp.
-  # routing-service: depends on mysql and kafka-init (completed).
-  # api-service: depends on mysql, mongo and kafka-init (completed).
+  # --- Application services (placeholders, added in M5) --------------------------
+  # Each service gets a HEALTHCHECK on /actuator/health and these depends_on rules:
+  #   intake-service:  mysql (service_healthy), sftp (service_healthy),
+  #                    kafka-init (service_completed_successfully)
+  #                    env: REMIT_INTAKE_DB_PASSWORD, REMIT_SFTP_*, kafka:9092
+  #   routing-service: mysql (service_healthy), kafka-init (service_completed_successfully)
+  #                    env: REMIT_ROUTING_DB_PASSWORD, kafka:9092
+  #   api-service:     mysql (service_healthy), mongo (service_healthy),
+  #                    kafka-init (service_completed_successfully)
+  #                    env: REMIT_API_DB_PASSWORD, REMIT_MONGO_*, REMIT_JWT_SECRET,
+  #                    REMIT_OPERATOR_PASSWORD, REMIT_ADMIN_PASSWORD, kafka:9092
 
 networks:
   remit:
