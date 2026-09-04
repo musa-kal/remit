@@ -1,15 +1,175 @@
+# intake-service configuration. Every secret comes from an environment variable (see .env.example);
+# the defaults below only describe where things are, never how to log in.
 spring:
   application:
     name: intake-service
+  datasource:
+    url: jdbc:mysql://${REMIT_MYSQL_HOST:localhost}:${REMIT_MYSQL_PORT:3307}/remit_intake?connectionTimeZone=UTC
+    username: ${REMIT_INTAKE_DB_USER:remit_intake}
+    password: ${REMIT_INTAKE_DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    locations: classpath:db/migration
+  batch:
+    job:
+      # Jobs are launched by the SFTP poller, never at startup.
+      enabled: false
+    jdbc:
+      # Flyway owns the Spring Batch tables (V1__spring_batch_metadata.sql).
+      initialize-schema: never
+  kafka:
+    bootstrap-servers: ${REMIT_KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    producer:
+      # FR-INT-05: wait for all in-sync replicas and never write duplicates on retry.
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        linger.ms: 5
+
+server:
+  port: ${REMIT_INTAKE_PORT:8081}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,ingestjobs
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  info:
+    env:
+      enabled: true
+
+info:
+  service: intake-service
+
+remit:
+  intake:
+    staging-dir: ${REMIT_STAGING_DIR:${java.io.tmpdir}/remit-staging}
+    chunk-size: 100
+    skip-limit: 1000
+    publish-timeout: 30s
+  sftp:
+    host: ${REMIT_SFTP_HOST:localhost}
+    port: ${REMIT_SFTP_PORT:2222}
+    user: ${REMIT_SFTP_USER}
+    password: ${REMIT_SFTP_PASSWORD}
+    poll-interval: ${REMIT_SFTP_POLL_INTERVAL:30s}
+    initial-delay: 5s
+    poller-enabled: true
+    allow-unknown-keys: false
+    inbound-dir: /inbound
+    processing-dir: /processing
+    processed-dir: /processed
+    error-dir: /error
+  kafka:
+    partitions: 3
+    replication-factor: 1
+  # Channel rules (spec 3.3). The limits are illustrative, not real payment scheme limits.
+  routing:
+    rules:
+      INTERAC:
+        max-amount: 10000.00
+        currencies: CAD
+      EFT:
+        max-amount: 25000000.00
+      WIRE: {}
+  clock:
+    # Optional ISO date that pins the business date (docs/decisions/0005-demo-clock.md).
+    fixed-date: ${REMIT_CLOCK_FIXED_DATE:}
 
 ---
-# Test profile: activated by @ActiveProfiles("test") in the test suite.
+# Running from an IDE or `mvn spring-boot:run` against `docker compose up` infrastructure.
+spring:
+  config:
+    activate:
+      on-profile: local
+management:
+  endpoint:
+    health:
+      show-details: always
+remit:
+  sftp:
+    # The atmoz/sftp container regenerates its host key whenever it is recreated.
+    allow-unknown-keys: true
+
+---
+# Running inside the compose network.
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: jdbc:mysql://${REMIT_MYSQL_HOST:mysql}:${REMIT_MYSQL_INTERNAL_PORT:3306}/remit_intake?connectionTimeZone=UTC
+  kafka:
+    bootstrap-servers: ${REMIT_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+management:
+  endpoint:
+    health:
+      show-details: always
+remit:
+  intake:
+    staging-dir: ${REMIT_STAGING_DIR:/app/staging}
+  sftp:
+    host: ${REMIT_SFTP_HOST:sftp}
+    port: ${REMIT_SFTP_INTERNAL_PORT:22}
+    allow-unknown-keys: true
+
+---
+# Running in Kubernetes (k8s/). Hosts are service names; secrets come from the remit Secret.
+spring:
+  config:
+    activate:
+      on-profile: k8s
+  datasource:
+    url: jdbc:mysql://${REMIT_MYSQL_HOST:mysql}:${REMIT_MYSQL_INTERNAL_PORT:3306}/remit_intake?connectionTimeZone=UTC
+  kafka:
+    bootstrap-servers: ${REMIT_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+remit:
+  intake:
+    staging-dir: ${REMIT_STAGING_DIR:/staging}
+  sftp:
+    host: ${REMIT_SFTP_HOST:sftp}
+    port: ${REMIT_SFTP_INTERNAL_PORT:22}
+    # The local overlay's SFTP pod generates a new host key on every start.
+    allow-unknown-keys: true
+
+---
+# Test profile: activated by @ActiveProfiles("test"). Container addresses and credentials are
+# supplied by the integration test base class; the values here are placeholders only.
 spring:
   config:
     activate:
       on-profile: test
   main:
     banner-mode: off
+remit:
+  sftp:
+    user: test
+    password: test
+    poller-enabled: false
+    allow-unknown-keys: true
+  clock:
+    fixed-date: 2026-10-15
 
 logging:
   level:
