@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  JSON logs on stdout (NFR-01). Every line carries the service name plus the MDC keys
+  correlationId (batch id), idempotencyKey and fileName when they are set. Account numbers are
+  masked in the code that logs them (MaskingUtil); never log a raw row or account.
+-->
+<configuration>
+  <springProperty scope="context" name="service" source="spring.application.name" defaultValue="intake-service"/>
+
+  <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <customFields>{"service":"${service}"}</customFields>
+      <includeMdcKeyName>correlationId</includeMdcKeyName>
+      <includeMdcKeyName>idempotencyKey</includeMdcKeyName>
+      <includeMdcKeyName>fileName</includeMdcKeyName>
+      <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+        <maxDepthPerThrowable>30</maxDepthPerThrowable>
+        <rootCauseFirst>true</rootCauseFirst>
+      </throwableConverter>
+    </encoder>
+  </appender>
+
+  <root level="INFO">
+    <appender-ref ref="JSON"/>
+  </root>
+</configuration>
