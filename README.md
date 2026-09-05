@@ -183,7 +183,7 @@ The script writes a valid file with rows spread over the three channels within t
 
 - [x] M0 Scaffold: parent POM, four modules, Spotless and JaCoCo configured
 - [x] M1 Local infra: MySQL (3 schemas), MongoDB, Kafka and topics, SFTP via Docker Compose
-- [ ] M2 Common + intake: event records, masking and idempotency utilities, Spring Batch intake
+- [x] M2 Common + intake: event records, masking and idempotency utilities, Spring Batch intake
 - [ ] M3 Routing: idempotent consumer, retries, dead-letter topic
 - [ ] M4 API + security + audit: REST endpoints, JWT and roles, MongoDB audit trail, DLT replay
 - [ ] M5 Containers + E2E: Dockerfiles, full compose stack, smoke test, measured throughput
