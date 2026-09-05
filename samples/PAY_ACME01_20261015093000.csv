@@ -1,0 +1,12 @@
+instruction_ref,debtor_name,debtor_institution,debtor_transit,debtor_account,creditor_name,creditor_institution,creditor_transit,creditor_account,amount,currency,channel,value_date,remittance_info
+ACME-0001,Acme Widgets Ltd,001,00011,1000001,Northwind Supplies,002,00022,2000001,1250.00,CAD,EFT,2026-10-15,Invoice 1001
+ACME-0002,Acme Widgets Ltd,001,00011,1000001,"Maple Leaf Paper, Co",003,00033,2000002,845.50,CAD,EFT,2026-10-15,Invoice 1002
+ACME-0003,Acme Widgets Ltd,001,00011,1000002,Harbour Freight Inc,004,00044,2000003,15000.00,USD,EFT,2026-10-15,PO 7781
+ACME-0004,Acme Widgets Ltd,001,00011,1000002,Prairie Grain Traders,006,00066,2000004,250000.00,USD,WIRE,2026-10-15,Contract 55-A
+ACME-0005,Acme Widgets Ltd,001,00011,1000003,Coastal Shipping Ltd,010,00101,2000005,98000.00,CAD,WIRE,2026-10-15,Freight Q4
+ACME-0006,Acme Widgets Ltd,001,00011,1000003,Jane Sample,002,00022,20000061,125.00,CAD,INTERAC,2026-10-15,Expense refund
+ACME-0007,Acme Widgets Ltd,001,00011,1000004,John Example,003,00033,20000071,9999.99,CAD,INTERAC,2026-10-15,Bonus
+ACME-0008,Acme Widgets Ltd,001,00011,1000004,Rivera Consulting,004,00044,200000081,4200.00,CAD,EFT,2026-10-15,
+ACME-0009,Acme Widgets Ltd,001,00011,1000005,Lakeside Dental,006,00066,2000009,310.25,CAD,INTERAC,2026-10-15,Invoice 1009
+ACME-0010,Acme Widgets Ltd,001,00011,1000005,Summit Tools Corp,010,00101,2000010,56000.00,CAD,EFT,2026-10-15,Invoice 1010
+TRAILER,10,435730.74

@@ -1,0 +1,6 @@
+instruction_ref,debtor_name,debtor_institution,debtor_transit,debtor_account,creditor_name,creditor_institution,creditor_transit,creditor_account,amount,currency,channel,value_date,remittance_info
+BETA-0001,Beta Logistics Inc,002,00022,3000001,Northwind Supplies,002,00022,2000001,1000.00,CAD,EFT,2026-10-15,Invoice B-1
+BETA-0002,Beta Logistics Inc,002,00022,3000001,Coastal Shipping Ltd,010,00101,2000005,50000.00,USD,WIRE,2026-10-15,Contract B-2
+BETA-0003,Beta Logistics Inc,002,00022,3000002,Jane Sample,002,00022,20000061,200.00,CAD,INTERAC,2026-10-15,Refund B-3
+BETA-0004,Beta Logistics Inc,002,00022,3000002,Summit Tools Corp,010,00101,2000010,3000.00,CAD,EFT,2026-10-15,Invoice B-4
+TRAILER,4,54300.00
