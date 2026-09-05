@@ -93,7 +93,8 @@ BEGIN {
       run, i, i % 50, 1000000 + i % 8999999, i % 75, 2000000 + (i * 31) % 7999999, \
       int(cents / 100), cents % 100, currency, channel, value_date, i
   }
-  printf "TRAILER,%d,%d.%02d\n", rows, int(total / 100), total % 100
+  # %.0f keeps large totals exact in awks whose %d is 32 bit (mawk).
+  printf "TRAILER,%d,%.0f.%02d\n", rows, int(total / 100), total % 100
 }' >"${file}"
 
 echo "${file}"
