@@ -108,6 +108,77 @@ Notes:
 - The init scripts in `docker/` run only when a data volume is empty. After changing a password in `.env`, recreate with `docker compose down -v`.
 - The SFTP host key is regenerated whenever the container is recreated, so local clients should not pin it.
 
+## intake-service
+
+intake-service polls the SFTP `/inbound` directory every `REMIT_SFTP_POLL_INTERVAL` (default 30 s). Each `.csv` file is downloaded to a local staging directory, moved to `/processing`, and run through the Spring Batch job `ingestPaymentFileJob`:
+
+1. `fileValidationStep` checks the file name, rejects a file whose SHA-256 is already in `file_registry`, then checks header, trailer, zero rows, record count and control total. An accepted file gets a batch id and a `RECEIVED` batch event.
+2. `instructionStep` reads the rows in chunks of 100, validates every field and channel rule, publishes valid instructions to `payments.instructions` (key: debtor account) and each invalid row to `payments.rejected` with its reason codes and a masked copy of the line.
+3. `finalizeStep` publishes the final batch event: `COMPLETED`, `COMPLETED_WITH_ERRORS`, or `FAILED` when more than 50% of the rows, or more than `remit.intake.skip-limit` (1000) rows, were rejected.
+
+Afterwards the remote file moves to `/processed`, or to `/error` next to a `<file>.error.txt` whose first line is the reason code. A job that fails for a technical reason (Kafka or MySQL down) leaves the file in `/processing` and can be restarted from its last committed chunk; see [the runbook](docs/runbook.md). [ADR 0007](docs/decisions/0007-intake-failure-handling.md) explains the three kinds of failure.
+
+Every event carries the headers `eventId`, `eventType`, `occurredAt`, `correlationId` (the batch id) and `schemaVersion`. Logs are JSON with `service`, `correlationId` and `fileName`; account numbers only ever appear masked to their last four digits.
+
+### File format
+
+File name `PAY_<CLIENTID>_<yyyyMMddHHmmss>.csv`, `CLIENTID` being 3 to 10 upper-case letters or digits. UTF-8, comma separated with RFC 4180 quoting, a fixed header line and a trailer `TRAILER,<record_count>,<control_total>`:
+
+```
+instruction_ref,debtor_name,debtor_institution,debtor_transit,debtor_account,creditor_name,creditor_institution,creditor_transit,creditor_account,amount,currency,channel,value_date,remittance_info
+ACME-0001,Acme Widgets Ltd,001,00011,1000001,Northwind Supplies,002,00022,2000001,1250.00,CAD,EFT,2026-10-15,Invoice 1001
+TRAILER,1,1250.00
+```
+
+| Field | Rule |
+|---|---|
+| `instruction_ref` | 1 to 35 of `[A-Za-z0-9-]`, unique within the file |
+| names | 1 to 70 characters |
+| institution / transit / account | 3 digits / 5 digits / 7 to 12 digits |
+| `amount` | greater than 0, at most 2 decimals, at most 999,999,999.99 |
+| `currency` / `channel` | `CAD` or `USD` / `EFT`, `WIRE` or `INTERAC` |
+| `value_date` | `yyyy-MM-dd`, from today (America/Toronto) to 30 days ahead |
+| `remittance_info` | optional, at most 140 characters |
+
+Channel rules, configured under `remit.routing.rules`: INTERAC is CAD only and at most 10,000.00; EFT is at most 25,000,000.00; WIRE has no maximum, and routing-service will send amounts of 1,000,000.00 or more to review. **These limits are illustrative, not the limits of any real payment scheme.**
+
+The instruction idempotency key is `SHA-256(clientId + "|" + instruction_ref)`, so the same reference from the same client is a duplicate in any file, while two clients may use the same reference.
+
+### Sample files
+
+| File | Content | Expected result |
+|---|---|---|
+| `PAY_ACME01_20261015093000.csv` | 10 valid rows over EFT, WIRE and INTERAC | COMPLETED, 10 published |
+| `PAY_ACME01_20261015100000.csv` | 20 rows, 5 invalid (account, amount, currency, value date, INTERAC limit) | COMPLETED_WITH_ERRORS, 15 published, 5 rejected |
+| `PAY_ACME01_20261015110000.csv` | byte-identical copy of the first file | FAILED, `DUPLICATE_FILE` |
+| `PAY_BETA02_20261015120000.csv` | trailer control total 100.00 too high | FAILED, `CONTROL_TOTAL_MISMATCH` |
+| `PAY_BETA02_20261015130000.csv` | two WIREs of 1,000,000.00 or more, one reference reused from ACME01 | COMPLETED, 6 published |
+
+Row-by-row expectations, including what routing-service should do with each instruction, are in [docs/e2e-expectations.md](docs/e2e-expectations.md). The valid rows use value date 2026-10-15, so with the real clock the samples are accepted from 2026-09-15 to 2026-10-15. On any other date set `REMIT_CLOCK_FIXED_DATE=2026-10-15`, which pins the business date for a demo ([ADR 0005](docs/decisions/0005-demo-clock.md)); the integration tests always run with that date.
+
+### Run it locally
+
+With the compose infrastructure up and `.env` filled in:
+
+```bash
+./mvnw -B -q package -pl intake-service -am -DskipTests
+set -a; . ./.env; set +a
+java -jar intake-service/target/intake-service-0.1.0.jar --spring.profiles.active=local
+
+docker compose cp samples/PAY_ACME01_20261015093000.csv sftp:/home/remit/inbound/
+curl -s localhost:8081/actuator/health/readiness
+curl -s localhost:8081/actuator/ingestjobs      # recent job executions
+```
+
+### Generate a large file
+
+```bash
+scripts/gen-batch.sh -o /tmp ACME01 10000     # prints /tmp/PAY_ACME01_<timestamp>.csv
+VALUE_DATE=2026-10-15 scripts/gen-batch.sh LOAD01 500
+```
+
+The script writes a valid file with rows spread over the three channels within their limits, a control total summed in integer cents, and value date tomorrow in America/Toronto unless `VALUE_DATE` is set. Run `scripts/gen-batch.sh -h` for all options. It needs GNU or BSD `date` with time zone data.
+
 ## Status
 
 - [x] M0 Scaffold: parent POM, four modules, Spotless and JaCoCo configured
