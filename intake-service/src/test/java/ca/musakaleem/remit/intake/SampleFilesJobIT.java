@@ -24,7 +24,10 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.batch.core.JobExecution;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 /**
  * Runs {@code ingestPaymentFileJob} on each committed sample file (spec 3.7) and checks the
@@ -32,6 +35,7 @@ import org.springframework.batch.core.JobExecution;
  * have been registered.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ExtendWith(OutputCaptureExtension.class)
 class SampleFilesJobIT extends AbstractIntakeIT {
 
   private static final Pattern UNMASKED_ACCOUNT = Pattern.compile("(?<![\\w.-])\\d{7,}(?![\\w.-])");
@@ -91,7 +95,8 @@ class SampleFilesJobIT extends AbstractIntakeIT {
 
   @Test
   @Order(2)
-  void fiveInvalidRowsAreRejectedOnePerRuleAndTheRestPublished() throws Exception {
+  void fiveInvalidRowsAreRejectedOnePerRuleAndTheRestPublished(CapturedOutput output)
+      throws Exception {
     JobExecution execution = launch("PAY_ACME01_20261015100000.csv", "ACME01");
 
     String batchId = batchId(execution);
@@ -136,6 +141,9 @@ class SampleFilesJobIT extends AbstractIntakeIT {
     assertThat(completed.acceptedRows()).isEqualTo(15);
     assertThat(completed.rejectedRows()).isEqualTo(5);
     assertRegistry(batchId, BatchStatus.COMPLETED_WITH_ERRORS, null);
+    // FR-INT-07: rejected rows are logged, but only with masked account numbers.
+    assertThat(output.getAll()).contains("Rejected line 4").contains("***0004");
+    assertThat(output.getAll()).doesNotContain("2000004").doesNotContain("20000071");
   }
 
   @Test
