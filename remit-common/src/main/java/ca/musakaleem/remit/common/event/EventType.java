@@ -6,5 +6,7 @@ public enum EventType {
   INSTRUCTION_REJECTED,
   BATCH_RECEIVED,
   BATCH_COMPLETED,
-  INSTRUCTION_STATUS
+  INSTRUCTION_STATUS,
+  /** An instruction published by routing-service to its {@code payments.routed.*} topic. */
+  INSTRUCTION_ROUTED
 }
