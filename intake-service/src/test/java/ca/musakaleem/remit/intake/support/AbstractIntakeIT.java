@@ -8,10 +8,12 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.test.JobLauncherTestUtils;
-import org.springframework.batch.test.context.SpringBatchTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -25,7 +27,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
-@SpringBatchTest
 public abstract class AbstractIntakeIT {
 
   /** Repository root, so tests can read the committed sample files. */
@@ -33,9 +34,19 @@ public abstract class AbstractIntakeIT {
 
   private static final Path STAGING_DIR = tempStagingDir();
 
-  @Autowired protected JobLauncherTestUtils jobLauncherTestUtils;
+  protected JobLauncherTestUtils jobLauncherTestUtils;
 
   @Autowired protected FileRegistryRepository registry;
+
+  @Autowired
+  void jobLauncherTestUtils(JobLauncher jobLauncher, JobRepository jobRepository, Job job) {
+    // Built by hand instead of @SpringBatchTest, whose listeners try to call any test method
+    // returning a JobExecution.
+    jobLauncherTestUtils = new JobLauncherTestUtils();
+    jobLauncherTestUtils.setJobLauncher(jobLauncher);
+    jobLauncherTestUtils.setJobRepository(jobRepository);
+    jobLauncherTestUtils.setJob(job);
+  }
 
   @DynamicPropertySource
   static void containers(DynamicPropertyRegistry registry) {
