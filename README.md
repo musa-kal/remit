@@ -59,6 +59,10 @@ Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_
 | `api-service/` | Operator REST API, security, read model, audit writer |
 | `docker/` | Init scripts for MySQL, MongoDB and Kafka topics used by compose |
 | `docker-compose.yml` | Local infrastructure stack |
+| `samples/` | The five sample batch files (see [Intake](#intake-service)) |
+| `scripts/` | Bash ops scripts (`gen-batch.sh` so far) |
+| `docs/runbook.md` | Operational procedures |
+| `docs/e2e-expectations.md` | Expected outcome of every sample file |
 | `docs/decisions/` | Architecture decision records |
 
 ## Build
