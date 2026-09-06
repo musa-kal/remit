@@ -16,7 +16,8 @@ class TopicsTest {
   }
 
   @Test
-  void deadLetterTopicUsesSpringKafkaDefaultSuffix() {
+  void deadLetterTopicAppendsDotDltToTheSourceTopic() {
+    // Spring Kafka 3.3 defaults to a "-dlt" suffix, so routing-service names this topic itself.
     assertThat(Topics.INSTRUCTIONS_DLT).isEqualTo(Topics.INSTRUCTIONS + ".DLT");
   }
 
