@@ -1,6 +1,8 @@
 package ca.musakaleem.remit.common;
 
+import ca.musakaleem.remit.common.event.Channel;
 import java.util.List;
+import java.util.Objects;
 
 /** Kafka topic names shared by every Remit service (spec section 5). */
 public final class Topics {
@@ -15,6 +17,21 @@ public final class Topics {
   public static final String INSTRUCTIONS_DLT = "payments.instructions.DLT";
 
   private Topics() {}
+
+  /**
+   * Returns the topic routing-service publishes an instruction of the given channel to.
+   *
+   * @param channel payment channel
+   * @return {@code payments.routed.eft}, {@code payments.routed.wire} or {@code
+   *     payments.routed.interac}
+   */
+  public static String routed(Channel channel) {
+    return switch (Objects.requireNonNull(channel, "channel")) {
+      case EFT -> ROUTED_EFT;
+      case WIRE -> ROUTED_WIRE;
+      case INTERAC -> ROUTED_INTERAC;
+    };
+  }
 
   /**
    * Returns every topic name, in the order they appear in the spec.
