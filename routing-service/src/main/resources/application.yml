@@ -1,15 +1,156 @@
+# routing-service configuration. Every secret comes from an environment variable (see .env.example);
+# the defaults below only describe where things are, never how to log in.
 spring:
   application:
     name: routing-service
+  datasource:
+    url: jdbc:mysql://${REMIT_MYSQL_HOST:localhost}:${REMIT_MYSQL_PORT:3307}/remit_routing?connectionTimeZone=UTC
+    username: ${REMIT_ROUTING_DB_USER:remit_routing}
+    password: ${REMIT_ROUTING_DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${REMIT_KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    consumer:
+      # FR-RTE-01: one consumer group; offsets are committed by the container, never automatically.
+      group-id: routing-service
+      enable-auto-commit: false
+      # A new group starts at the oldest instruction, so nothing published before startup is lost.
+      auto-offset-reset: earliest
+      # Key and value deserializers are set in KafkaConfig: StringDeserializer, and
+      # ErrorHandlingDeserializer around a JsonDeserializer for PaymentInstruction.
+    listener:
+      # Commit each record's offset as soon as the listener returns from it.
+      ack-mode: record
+      # One consumer thread per partition of payments.instructions (3 locally).
+      concurrency: 3
+    producer:
+      # FR-RTE-05 (as FR-INT-05): wait for all in-sync replicas and never write duplicates on retry.
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        # Every send is awaited one at a time, so batching would only add latency.
+        linger.ms: 0
+
+server:
+  port: ${REMIT_ROUTING_PORT:8082}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      # Component names and statuses (db, kafka, ...) without their details.
+      show-components: always
+      show-details: never
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  info:
+    env:
+      enabled: true
+
+info:
+  service: routing-service
+
+remit:
+  kafka:
+    partitions: 3
+    replication-factor: 1
+    # Upper bound for one Kafka health check (KafkaHealthIndicator).
+    health-timeout: 5s
+  routing:
+    # WIRE amounts at or above this are routed as REQUIRES_REVIEW (spec 3.3).
+    review-threshold: 1000000.00
+    # FR-RTE-04 chaos hook: remittanceInfo FORCE_FAIL fails every attempt. Off unless a profile enables it.
+    chaos-enabled: false
+    publish-timeout: 10s
+    # Channel rules (spec 3.3), same keys as intake-service. The limits are illustrative, not real
+    # payment scheme limits.
+    rules:
+      INTERAC:
+        max-amount: 10000.00
+        currencies: CAD
+      EFT:
+        max-amount: 25000000.00
+      WIRE: {}
 
 ---
-# Test profile: activated by @ActiveProfiles("test") in the test suite.
+# Running from an IDE or `java -jar` against `docker compose up` infrastructure.
+spring:
+  config:
+    activate:
+      on-profile: local
+management:
+  endpoint:
+    health:
+      show-details: always
+remit:
+  routing:
+    chaos-enabled: true
+
+---
+# Running inside the compose network.
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: jdbc:mysql://${REMIT_MYSQL_HOST:mysql}:${REMIT_MYSQL_INTERNAL_PORT:3306}/remit_routing?connectionTimeZone=UTC
+  kafka:
+    bootstrap-servers: ${REMIT_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+management:
+  endpoint:
+    health:
+      show-details: always
+remit:
+  routing:
+    chaos-enabled: true
+
+---
+# Running in Kubernetes (k8s/). Hosts are service names; secrets come from the remit Secret.
+spring:
+  config:
+    activate:
+      on-profile: k8s
+  datasource:
+    url: jdbc:mysql://${REMIT_MYSQL_HOST:mysql}:${REMIT_MYSQL_INTERNAL_PORT:3306}/remit_routing?connectionTimeZone=UTC
+  kafka:
+    bootstrap-servers: ${REMIT_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+remit:
+  routing:
+    chaos-enabled: false
+
+---
+# Test profile: activated by @ActiveProfiles("test"). Container addresses and credentials are
+# supplied by the integration test base class.
 spring:
   config:
     activate:
       on-profile: test
   main:
     banner-mode: off
+management:
+  endpoint:
+    health:
+      show-details: always
 
 logging:
   level:
