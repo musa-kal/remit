@@ -140,7 +140,7 @@ TRAILER,1,1250.00
 | `value_date` | `yyyy-MM-dd`, from today (America/Toronto) to 30 days ahead |
 | `remittance_info` | optional, at most 140 characters |
 
-Channel rules, configured under `remit.routing.rules`: INTERAC is CAD only and at most 10,000.00; EFT is at most 25,000,000.00; WIRE has no maximum, and routing-service will send amounts of 1,000,000.00 or more to review. **These limits are illustrative, not the limits of any real payment scheme.**
+Channel rules, configured under `remit.routing.rules`: INTERAC is CAD only and at most 10,000.00; EFT is at most 25,000,000.00; WIRE has no maximum, and routing-service sends amounts of 1,000,000.00 or more to review (`REQUIRES_REVIEW`). **These limits are illustrative, not the limits of any real payment scheme.**
 
 The instruction idempotency key is `SHA-256(clientId + "|" + instruction_ref)`, so the same reference from the same client is a duplicate in any file, while two clients may use the same reference.
 
@@ -178,6 +178,53 @@ VALUE_DATE=2026-10-15 scripts/gen-batch.sh LOAD01 500
 ```
 
 The script writes a valid file with rows spread over the three channels within their limits, a control total summed in integer cents, and value date tomorrow in America/Toronto unless `VALUE_DATE` is set. Run `scripts/gen-batch.sh -h` for all options. It needs GNU or BSD `date` with time zone data.
+
+## routing-service
+
+routing-service consumes `payments.instructions` and routes each instruction to `payments.routed.eft`, `payments.routed.wire` or `payments.routed.interac`, exactly once in effect however often it is delivered.
+
+### Consumer settings
+
+| Setting | Value |
+|---|---|
+| Consumer group | `routing-service` |
+| Offset commits | `enable.auto.commit=false`, `AckMode.RECORD`: the container commits each record's offset after the listener returns |
+| Concurrency | 3 consumer threads (one per partition locally) |
+| Deserializer | `ErrorHandlingDeserializer` around `JsonDeserializer<PaymentInstruction>`, type headers trusted only from `ca.musakaleem.remit.common.event` |
+| Producer | `acks=all`, `enable.idempotence=true`, JSON values, every send awaited (`send(...).get(timeout)`) |
+
+### Algorithm (FR-RTE-02)
+
+1. Insert a `processed_instruction` row with status `ROUTING` in its own transaction. The primary key is the idempotency key.
+2. If the key already exists: a `ROUTED` or `REQUIRES_REVIEW` row means this is a duplicate, so publish a `DUPLICATE` status event and stop. A `ROUTING` row means an earlier attempt failed or crashed, so count the attempt and carry on.
+3. Re-check the channel rules (a violation is not retried) and publish the instruction to its channel topic, keyed by idempotency key.
+4. Set the row to `ROUTED`, or `REQUIRES_REVIEW` for a WIRE of 1,000,000.00 or more (`remit.routing.review-threshold`), and commit. Then publish the status event (`REPLAYED` first for a replayed instruction) to `payments.status-events`, and let the offset be committed.
+
+[ADR 0002](docs/decisions/0002-idempotency.md) explains why this uses a database unique key rather than Kafka's producer idempotence or transactions, and what happens on a crash at each step.
+
+Every routed record and status event carries the five standard headers; routed records also carry `routingStatus` (`ROUTED` or `REQUIRES_REVIEW`). Logs are JSON with `service`, `correlationId` and `idempotencyKey`; the debtor account appears only masked.
+
+### Retries and the dead-letter topic
+
+A failing record is retried with exponential back-off (1 s, then 2 s: three attempts in total) and then published to `payments.instructions.DLT` on the same partition, with its original key, value and headers plus Spring's `kafka_dlt-*` exception and origin headers. A `DEAD_LETTERED` status event with the failure reason follows. A channel rule violation (`NonRetryableRoutingException`) and a record that cannot be deserialized (a poison pill) skip the retries, and a poison pill never blocks the records behind it. api-service replays dead letters by republishing them with `replayCount + 1`, at most three times. See [ADR 0003](docs/decisions/0003-dlt-and-replay.md) and [Inspect the DLT](docs/runbook.md#inspect-the-dlt).
+
+### Chaos hook (FR-RTE-04)
+
+With `remit.routing.chaos-enabled=true` an instruction whose `remittance_info` is exactly `FORCE_FAIL` fails every attempt with a retryable error, so it lands on the DLT after three attempts. It is on in the `local` and `docker` profiles for demos and off by default and in `k8s`.
+
+### Run it locally
+
+With the compose infrastructure up and `.env` filled in:
+
+```bash
+./mvnw -B -q package -pl routing-service -am -DskipTests
+set -a; . ./.env; set +a
+java -jar routing-service/target/routing-service-0.1.0.jar --spring.profiles.active=local
+
+curl -s localhost:8082/actuator/health    # db and kafka components, both UP
+```
+
+Run intake-service next to it and drop a sample file (see above); `docs/e2e-expectations.md` lists the routing outcome of every sample instruction.
 
 ## Status
 
