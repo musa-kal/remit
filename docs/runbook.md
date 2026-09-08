@@ -72,3 +72,62 @@ WHERE JOB_EXECUTION_ID = 42;
 ```
 
 Then restart it as in step 3.
+
+## Inspect the DLT
+
+routing-service dead-letters an instruction to `payments.instructions.DLT` after three failed attempts (1 s and 2 s back-off), at once for a channel rule violation, and at once for a record it cannot deserialize. Each dead-lettered instruction also gets a `DEAD_LETTERED` event on `payments.status-events`; a poison pill does not, because it has no readable key. [ADR 0003](decisions/0003-dlt-and-replay.md) lists every header.
+
+### Count and list the records
+
+With Docker Compose running (the paths are inside the `kafka` container; on Git Bash for Windows prefix the commands with `MSYS_NO_PATHCONV=1`):
+
+```bash
+# Records per partition (end offsets)
+docker compose exec kafka /opt/kafka/bin/kafka-get-offsets.sh \
+  --bootstrap-server localhost:9092 --topic payments.instructions.DLT
+
+# Key and payload of every record, with partition and offset
+docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 --topic payments.instructions.DLT \
+  --from-beginning --timeout-ms 5000 \
+  --property print.partition=true --property print.offset=true --property print.key=true
+```
+
+The key is the original record key (the debtor account) and the value is the original instruction JSON, or the original bytes of an unreadable record.
+
+### Why did it fail?
+
+Add the headers. `kafka_dlt-exception-stacktrace` holds a multi-line stack trace; the `grep` drops its lines and keeps the rest:
+
+```bash
+docker compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 --topic payments.instructions.DLT \
+  --from-beginning --timeout-ms 5000 \
+  --property print.partition=true --property print.offset=true \
+  --property print.key=true --property print.headers=true \
+  | grep -a -Ev '^([[:space:]]|Caused by)'
+```
+
+Read `kafka_dlt-exception-cause-fqcn` and `kafka_dlt-exception-message` first:
+
+| Cause | Meaning | Action |
+|---|---|---|
+| `ca.musakaleem.remit.routing.error.RoutingException` | Retried three times and still failing: Kafka did not acknowledge a publish, or the chaos hook (`remittanceInfo` = `FORCE_FAIL`, local and docker profiles only) | Fix the cause (check `/actuator/health` on port 8082), then replay |
+| `ca.musakaleem.remit.routing.error.NonRetryableRoutingException` | The instruction breaks a channel rule (for example INTERAC in USD) or lacks a required field | Do not replay; the client must send a corrected instruction |
+| `org.springframework.kafka.support.serializer.DeserializationException` | The record is not a readable `PaymentInstruction` (malformed JSON or an untrusted `__TypeId__`) | Do not replay; find the producer that wrote it (see `kafka_dlt-original-*` and `eventId`) |
+
+`kafka_dlt-original-partition` and `kafka_dlt-original-offset` are binary (4-byte int and 8-byte long), so the console consumer prints them as unreadable characters; the DLT record's own partition equals the original partition.
+
+### Check the routing ledger
+
+The ledger row of a dead-lettered instruction stays `ROUTING`; `attempts` is 3 after retries and 1 after a rule violation. Replace the key:
+
+```bash
+docker compose exec mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e \
+  "SELECT status, attempts, updated_at FROM remit_routing.processed_instruction
+   WHERE idempotency_key = \"<idempotencyKey>\""'
+```
+
+### Replay
+
+Replay goes through api-service (`POST /api/v1/dead-letters/{id}/replay`, role ADMIN), which republishes the payload with `replayCount + 1` and refuses once `replayCount` reaches 3. routing-service then publishes `REPLAYED` followed by `ROUTED` or `REQUIRES_REVIEW`.
