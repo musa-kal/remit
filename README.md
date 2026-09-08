@@ -55,13 +55,13 @@ Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_
 |---|---|
 | `remit-common/` | Shared event records, enums, topic names, masking utilities |
 | `intake-service/` | SFTP polling and the Spring Batch ingestion job |
-| `routing-service/` | Idempotent Kafka consumer and channel routing |
+| `routing-service/` | Idempotent Kafka consumer, channel routing, retries and the dead-letter topic |
 | `api-service/` | Operator REST API, security, read model, audit writer |
 | `docker/` | Init scripts for MySQL, MongoDB and Kafka topics used by compose |
 | `docker-compose.yml` | Local infrastructure stack |
 | `samples/` | The five sample batch files (see [Intake](#intake-service)) |
 | `scripts/` | Bash ops scripts (`gen-batch.sh` so far) |
-| `docs/runbook.md` | Operational procedures |
+| `docs/runbook.md` | Operational procedures (restart a failed batch job, inspect the DLT) |
 | `docs/e2e-expectations.md` | Expected outcome of every sample file |
 | `docs/decisions/` | Architecture decision records |
 
@@ -231,7 +231,7 @@ Run intake-service next to it and drop a sample file (see above); `docs/e2e-expe
 - [x] M0 Scaffold: parent POM, four modules, Spotless and JaCoCo configured
 - [x] M1 Local infra: MySQL (3 schemas), MongoDB, Kafka and topics, SFTP via Docker Compose
 - [x] M2 Common + intake: event records, masking and idempotency utilities, Spring Batch intake
-- [ ] M3 Routing: idempotent consumer, retries, dead-letter topic
+- [x] M3 Routing: idempotent consumer, retries, dead-letter topic
 - [ ] M4 API + security + audit: REST endpoints, JWT and roles, MongoDB audit trail, DLT replay
 - [ ] M5 Containers + E2E: Dockerfiles, full compose stack, smoke test, measured throughput
 - [ ] M6 Postman: collection and environments, Newman run
