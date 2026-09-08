@@ -1,6 +1,6 @@
 # End-to-end expectations for the sample files
 
-`scripts/smoke-test.sh` (M5) uploads every file in `samples/` and compares what the API reports with this table. The intake columns are verified today by `SampleFilesJobIT`; the routing columns are what routing-service (M3) must produce.
+`scripts/smoke-test.sh` (M5) uploads every file in `samples/` and compares what the API reports with this table. The intake columns are verified by `SampleFilesJobIT`. The routing columns follow from the routing rules that `RoutingRulesTest` and the routing-service integration tests cover; `smoke-test.sh` checks them end to end.
 
 Assumptions:
 
@@ -41,6 +41,8 @@ Line numbers count the header as line 1. Account digits in `rawLine` are masked 
 | `PAY_ACME01_20261015110000.csv` | 0 | 0 | 0 | none published |
 | `PAY_BETA02_20261015120000.csv` | 0 | 0 | 0 | none published |
 | `PAY_BETA02_20261015130000.csv` | 4 | 2 (BETA-0102 1,500,000.00 USD, BETA-0104 1,000,000.00 CAD) | 0 | EFT 3, WIRE 2, INTERAC 1 |
+
+The duplicate `ACME-0003` gets one `DUPLICATE` status event with detail `already ROUTED`, carrying the batch id of the 100000 file it arrived in; it is not published to `payments.routed.eft` a second time, so the EFT topic holds 7 records for that file, not 8.
 
 `PAY_BETA02_20261015130000.csv` re-uses the reference `ACME-0001` from ACME01. Keys are client scoped, so it is a new instruction for BETA02 ([ADR 0006](decisions/0006-sample-duplicate-instruction.md)).
 
