@@ -11,6 +11,7 @@ import ca.musakaleem.remit.routing.rules.ChaosHook;
 import ca.musakaleem.remit.routing.rules.RoutingDecision;
 import ca.musakaleem.remit.routing.rules.RoutingRules;
 import java.time.Clock;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -135,7 +136,9 @@ public class RoutingService {
       return ProcessingStatus.ROUTING;
     } catch (DataIntegrityViolationException duplicateKey) {
       // The insert rolled back. Read the existing row in a fresh transaction.
-      return transactions.execute(tx -> resumeExisting(instruction, duplicateKey));
+      ProcessingStatus existing =
+          transactions.execute(tx -> resumeExisting(instruction, duplicateKey));
+      return Objects.requireNonNull(existing, "existing status");
     }
   }
 
