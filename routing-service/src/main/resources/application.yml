@@ -70,6 +70,12 @@ management:
 info:
   service: routing-service
 
+logging:
+  level:
+    # A duplicate key on processed_instruction is the expected idempotency signal (FR-RTE-02), not
+    # an error. Any other SQL failure still propagates and is logged by the Kafka error handler.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
+
 remit:
   kafka:
     partitions: 3
