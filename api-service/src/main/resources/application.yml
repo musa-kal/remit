@@ -1,15 +1,194 @@
+# api-service configuration. Every secret comes from an environment variable (see .env.example);
+# the defaults below only describe where things are, never how to log in.
 spring:
   application:
     name: api-service
+  datasource:
+    url: jdbc:mysql://${REMIT_MYSQL_HOST:localhost}:${REMIT_MYSQL_PORT:3307}/remit_api?connectionTimeZone=UTC
+    username: ${REMIT_API_DB_USER:remit_api}
+    password: ${REMIT_API_DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    locations: classpath:db/migration
+  data:
+    mongodb:
+      # The app user may only find, insert and list indexes (docker/mongo/init.js), so the password
+      # must be URL safe. The collection and its indexes are created by the init script.
+      uri: mongodb://${REMIT_MONGO_USER:remit_audit}:${REMIT_MONGO_PASSWORD:}@${REMIT_MONGO_HOST:localhost}:${REMIT_MONGO_PORT:27018}/remit_audit?authSource=remit_audit
+      auto-index-creation: false
+    web:
+      pageable:
+        # Page sizes above 100 are clamped to 100 (docs/api.md).
+        max-page-size: 100
+        default-page-size: 20
+  jackson:
+    generator:
+      write-bigdecimal-as-plain: true
+    serialization:
+      write-dates-as-timestamps: false
+  kafka:
+    bootstrap-servers: ${REMIT_KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    consumer:
+      # FR-API-01: one consumer group for every read model listener.
+      group-id: api-service
+      enable-auto-commit: false
+      # A new group starts at the oldest event, so the read model can be rebuilt from the topics.
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Value deserializers are set in KafkaConfig: JSON by type header for events, raw bytes for
+      # the dead-letter topic.
+    listener:
+      # Commit each record's offset once the listener returns from it.
+      ack-mode: record
+    producer:
+      # Replays are published like intake publishes instructions: acks=all, idempotent.
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        linger.ms: 0
+
+server:
+  port: ${REMIT_API_PORT:8080}
+  shutdown: graceful
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-components: always
+      show-details: never
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  info:
+    env:
+      enabled: true
+
+info:
+  service: api-service
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+  # Stable key order so the exported docs/openapi.json only changes when the API changes.
+  writer-with-order-by-keys: true
+  default-produces-media-type: application/json
+  paths-to-match: /api/**
+
+remit:
+  kafka:
+    partitions: 3
+    replication-factor: 1
+    # Upper bound for one Kafka health check (KafkaHealthIndicator).
+    health-timeout: 5s
+    # How long a replay waits for Kafka to acknowledge the republished instruction.
+    publish-timeout: 10s
+  replay:
+    # POST /dead-letters/{id}/replay answers 409 once a dead letter was replayed this often.
+    max-replays: 3
+  security:
+    jwt:
+      # HS256 key, at least 32 bytes. Startup fails when it is missing or shorter.
+      secret: ${REMIT_JWT_SECRET:}
+      ttl: 15m
+    login:
+      # FR-SEC-06: this many failures within the window lock the username for lock-duration.
+      max-failures: 5
+      window: 10m
+      lock-duration: 10m
+    seed-users:
+      # Creates operator and admin when missing. On in the local and docker profiles only.
+      enabled: ${REMIT_SEED_USERS_ENABLED:false}
+      operator-password: ${REMIT_OPERATOR_PASSWORD:}
+      admin-password: ${REMIT_ADMIN_PASSWORD:}
 
 ---
-# Test profile: activated by @ActiveProfiles("test") in the test suite.
+# Running from an IDE or `java -jar` against `docker compose up` infrastructure.
+spring:
+  config:
+    activate:
+      on-profile: local
+management:
+  endpoint:
+    health:
+      show-details: always
+remit:
+  security:
+    seed-users:
+      enabled: ${REMIT_SEED_USERS_ENABLED:true}
+
+---
+# Running inside the compose network.
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: jdbc:mysql://${REMIT_MYSQL_HOST:mysql}:${REMIT_MYSQL_INTERNAL_PORT:3306}/remit_api?connectionTimeZone=UTC
+  data:
+    mongodb:
+      uri: mongodb://${REMIT_MONGO_USER:remit_audit}:${REMIT_MONGO_PASSWORD:}@${REMIT_MONGO_HOST:mongo}:${REMIT_MONGO_INTERNAL_PORT:27017}/remit_audit?authSource=remit_audit
+  kafka:
+    bootstrap-servers: ${REMIT_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+management:
+  endpoint:
+    health:
+      show-details: always
+remit:
+  security:
+    seed-users:
+      enabled: ${REMIT_SEED_USERS_ENABLED:true}
+
+---
+# Running in Kubernetes (k8s/). Hosts are service names; secrets come from the remit Secret.
+# Users are not seeded unless REMIT_SEED_USERS_ENABLED=true (local kind cluster only).
+spring:
+  config:
+    activate:
+      on-profile: k8s
+  datasource:
+    url: jdbc:mysql://${REMIT_MYSQL_HOST:mysql}:${REMIT_MYSQL_INTERNAL_PORT:3306}/remit_api?connectionTimeZone=UTC
+  data:
+    mongodb:
+      uri: mongodb://${REMIT_MONGO_USER:remit_audit}:${REMIT_MONGO_PASSWORD:}@${REMIT_MONGO_HOST:mongo}:${REMIT_MONGO_INTERNAL_PORT:27017}/remit_audit?authSource=remit_audit
+  kafka:
+    bootstrap-servers: ${REMIT_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+
+---
+# Test profile: activated by @ActiveProfiles("test"). Container addresses, the JWT secret and the
+# seeded passwords are supplied by the integration test base class.
 spring:
   config:
     activate:
       on-profile: test
   main:
     banner-mode: off
+management:
+  endpoint:
+    health:
+      show-details: always
 
 logging:
   level:
