@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  JSON logs on stdout (NFR-01). Every line carries "service" (a logback context property, which
+  LogstashEncoder writes on each event) plus the MDC keys correlationId (batch id of a consumed
+  event, or the X-Correlation-Id of an HTTP request) and idempotencyKey while an instruction event
+  is handled. Tokens, passwords and full account numbers are never logged.
+  The test profile logs plain text so test reports stay readable.
+-->
+<configuration>
+  <springProperty scope="context" name="service" source="spring.application.name" defaultValue="api-service"/>
+
+  <springProfile name="!test">
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+      <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+        <includeMdcKeyName>correlationId</includeMdcKeyName>
+        <includeMdcKeyName>idempotencyKey</includeMdcKeyName>
+        <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+          <maxDepthPerThrowable>30</maxDepthPerThrowable>
+          <rootCauseFirst>true</rootCauseFirst>
+        </throwableConverter>
+      </encoder>
+    </appender>
+    <root level="INFO">
+      <appender-ref ref="JSON"/>
+    </root>
+  </springProfile>
+
+  <springProfile name="test">
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <property name="CONSOLE_LOG_PATTERN" value="%d{HH:mm:ss.SSS} %-5level [%thread] [%X{correlationId:-}] [%X{idempotencyKey:-}] %logger{36} - %msg%n"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+    <root level="INFO">
+      <appender-ref ref="CONSOLE"/>
+    </root>
+  </springProfile>
+</configuration>
