@@ -103,11 +103,11 @@ remit:
     replication-factor: 1
     # Upper bound for one Kafka health check (KafkaHealthIndicator).
     health-timeout: 5s
-    # How long a replay waits for Kafka to acknowledge the republished instruction.
-    publish-timeout: 10s
   replay:
     # POST /dead-letters/{id}/replay answers 409 once a dead letter was replayed this often.
     max-replays: 3
+    # How long a replay waits for Kafka to acknowledge the republished instruction.
+    publish-timeout: 10s
   security:
     jwt:
       # HS256 key, at least 32 bytes. Startup fails when it is missing or shorter.
