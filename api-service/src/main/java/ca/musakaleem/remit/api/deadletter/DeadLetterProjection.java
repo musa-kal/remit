@@ -104,18 +104,12 @@ public class DeadLetterProjection {
     PaymentInstruction instruction = record.instruction();
     String detail = record.exceptionMessage();
     InstructionRecord row =
-        instructions
-            .findById(instruction.idempotencyKey())
-            .orElseGet(
-                () ->
-                    instructions.save(
-                        new InstructionRecord(
-                            instruction.idempotencyKey(),
-                            instruction.batchId(),
-                            InstructionStatus.DEAD_LETTERED,
-                            instruction.channel(),
-                            detail,
-                            record.deadLetteredAt())));
+        instructions.claim(
+            instruction.idempotencyKey(),
+            instruction.batchId(),
+            InstructionStatus.DEAD_LETTERED,
+            instruction.channel(),
+            record.deadLetteredAt());
     row.applyDetails(instruction);
     row.applyStatus(
         InstructionStatus.DEAD_LETTERED, instruction.channel(), detail, record.deadLetteredAt());

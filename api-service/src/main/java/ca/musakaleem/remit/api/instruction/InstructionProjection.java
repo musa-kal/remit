@@ -7,7 +7,6 @@ import ca.musakaleem.remit.common.event.InstructionStatusEvent;
 import ca.musakaleem.remit.common.event.PaymentInstruction;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,25 +61,26 @@ public class InstructionProjection {
               event.occurredAt()));
       recorded = true;
     }
-    Optional<InstructionRecord> existing = instructions.findById(event.idempotencyKey());
     boolean applied;
-    if (existing.isPresent()) {
-      applied =
-          existing
-              .get()
-              .applyStatus(event.status(), event.channel(), event.detail(), event.occurredAt());
-    } else if (event.batchId() != null) {
-      instructions.save(
-          new InstructionRecord(
+    if (event.batchId() != null) {
+      InstructionRecord row =
+          instructions.claim(
               event.idempotencyKey(),
               event.batchId(),
               event.status(),
               event.channel(),
-              event.detail(),
-              event.occurredAt()));
-      applied = true;
+              event.occurredAt());
+      applied =
+          row.applyStatus(event.status(), event.channel(), event.detail(), event.occurredAt());
     } else {
-      applied = false;
+      applied =
+          instructions
+              .findForUpdate(event.idempotencyKey())
+              .map(
+                  row ->
+                      row.applyStatus(
+                          event.status(), event.channel(), event.detail(), event.occurredAt()))
+              .orElse(false);
     }
     List<DeadLetter> changed =
         deadLetters.onInstructionStatus(event.idempotencyKey(), event.status(), event.occurredAt());
@@ -94,27 +94,18 @@ public class InstructionProjection {
    * @param instruction the routed instruction
    * @param routingStatus the {@code routingStatus} header: ROUTED or REQUIRES_REVIEW
    * @param occurredAt the record's {@code occurredAt}
-   * @return true when the row was created by this record
    */
   @Transactional
-  public boolean applyRouted(
+  public void applyRouted(
       PaymentInstruction instruction, InstructionStatus routingStatus, Instant occurredAt) {
-    Optional<InstructionRecord> existing = instructions.findById(instruction.idempotencyKey());
-    if (existing.isPresent()) {
-      existing.get().applyDetails(instruction);
-      return false;
-    }
-    InstructionRecord created =
-        new InstructionRecord(
+    instructions
+        .claim(
             instruction.idempotencyKey(),
             instruction.batchId(),
             routingStatus,
             instruction.channel(),
-            null,
-            occurredAt);
-    created.applyDetails(instruction);
-    instructions.save(created);
-    return true;
+            occurredAt)
+        .applyDetails(instruction);
   }
 
   /**

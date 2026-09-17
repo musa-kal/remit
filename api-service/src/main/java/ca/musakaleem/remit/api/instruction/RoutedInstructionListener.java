@@ -65,7 +65,7 @@ public class RoutedInstructionListener {
     MDC.put(MdcKeys.CORRELATION_ID, batchId);
     MDC.put(MdcKeys.IDEMPOTENCY_KEY, instruction.idempotencyKey());
     try {
-      boolean created = projection.applyRouted(instruction, routingStatus, meta.occurredAt());
+      projection.applyRouted(instruction, routingStatus, meta.occurredAt());
       Map<String, Object> details = new LinkedHashMap<>();
       details.put("topic", record.topic());
       details.put("channel", instruction.channel());
@@ -79,7 +79,6 @@ public class RoutedInstructionListener {
           "creditorAccount",
           instruction.creditor() == null ? null : instruction.creditor().account());
       details.put("replayCount", instruction.replayCount());
-      details.put("createdReadModelRow", created);
       audit.recordEvent(
           meta.eventId(),
           AuditEventType.INSTRUCTION_ROUTED,
