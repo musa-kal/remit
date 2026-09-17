@@ -4,8 +4,9 @@ import ca.musakaleem.remit.common.RemitJson;
 import ca.musakaleem.remit.common.event.InstructionStatus;
 import ca.musakaleem.remit.common.event.PaymentInstruction;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -46,9 +47,19 @@ public final class Fixtures {
         "PAY_" + clientId + "_20261015093000.csv",
         "c".repeat(64),
         status,
-        Timestamp.from(receivedAt),
-        Timestamp.from(receivedAt.plusSeconds(5)),
-        Timestamp.from(receivedAt.plusSeconds(5)));
+        utc(receivedAt),
+        utc(receivedAt.plusSeconds(5)),
+        utc(receivedAt.plusSeconds(5)));
+  }
+
+  /**
+   * Formats an instant as a UTC literal. The test JDBC URL has no connectionTimeZone, so a {@code
+   * java.sql.Timestamp} would be shifted by the JVM's zone; the MySQL session zone is UTC.
+   */
+  private static String utc(Instant instant) {
+    return DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+        .withZone(ZoneOffset.UTC)
+        .format(instant);
   }
 
   /**
