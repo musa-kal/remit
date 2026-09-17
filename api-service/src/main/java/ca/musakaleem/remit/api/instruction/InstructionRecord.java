@@ -1,5 +1,6 @@
 package ca.musakaleem.remit.api.instruction;
 
+import ca.musakaleem.remit.api.messaging.EventTime;
 import ca.musakaleem.remit.common.event.Channel;
 import ca.musakaleem.remit.common.event.InstructionStatus;
 import ca.musakaleem.remit.common.event.Party;
@@ -128,7 +129,7 @@ public class InstructionRecord {
     this.status = Objects.requireNonNull(status, "status");
     this.channel = channel;
     this.statusDetail = cut(detail);
-    this.updatedAt = Objects.requireNonNull(occurredAt, "occurredAt");
+    this.updatedAt = EventTime.millis(Objects.requireNonNull(occurredAt, "occurredAt"));
   }
 
   /**
@@ -142,7 +143,8 @@ public class InstructionRecord {
    */
   public boolean applyStatus(
       InstructionStatus newStatus, Channel newChannel, String detail, Instant occurredAt) {
-    if (occurredAt.isBefore(updatedAt)) {
+    Instant at = EventTime.millis(occurredAt);
+    if (at.isBefore(updatedAt)) {
       return false;
     }
     if (newStatus == InstructionStatus.DUPLICATE && status != InstructionStatus.DUPLICATE) {
@@ -153,7 +155,7 @@ public class InstructionRecord {
     if (newChannel != null) {
       this.channel = newChannel;
     }
-    this.updatedAt = occurredAt;
+    this.updatedAt = at;
     return true;
   }
 

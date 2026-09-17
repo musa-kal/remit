@@ -1,5 +1,6 @@
 package ca.musakaleem.remit.api.deadletter;
 
+import ca.musakaleem.remit.api.messaging.EventTime;
 import ca.musakaleem.remit.common.event.InstructionStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -108,8 +109,8 @@ public class DeadLetter {
         deadLetter.replayCount >= maxReplays
             ? DeadLetterStatus.EXHAUSTED
             : DeadLetterStatus.PENDING;
-    deadLetter.firstSeenAt = record.deadLetteredAt();
-    deadLetter.updatedAt = record.deadLetteredAt();
+    deadLetter.firstSeenAt = EventTime.millis(record.deadLetteredAt());
+    deadLetter.updatedAt = deadLetter.firstSeenAt;
     return deadLetter;
   }
 
@@ -132,8 +133,9 @@ public class DeadLetter {
     if (status == DeadLetterStatus.REPLAY_REQUESTED) {
       this.status = afterFailedReplay(maxReplays);
     }
-    if (record.deadLetteredAt().isAfter(updatedAt)) {
-      this.updatedAt = record.deadLetteredAt();
+    Instant deadLetteredAt = EventTime.millis(record.deadLetteredAt());
+    if (deadLetteredAt.isAfter(updatedAt)) {
+      this.updatedAt = deadLetteredAt;
     }
     return true;
   }
@@ -147,7 +149,8 @@ public class DeadLetter {
    * @param now current time
    * @throws ReplayRejectedException when the replay is not allowed
    */
-  public void requestReplay(int maxReplays, Instant now) {
+  public void requestReplay(int maxReplays, Instant requestedAt) {
+    Instant now = EventTime.millis(requestedAt);
     if (idempotencyKey == null) {
       throw new ReplayRejectedException(
           "Dead letter " + id + " holds an unreadable record; it cannot be replayed");
@@ -182,9 +185,10 @@ public class DeadLetter {
    */
   public boolean onInstructionStatus(
       InstructionStatus instructionStatus, Instant occurredAt, int maxReplays) {
+    Instant at = EventTime.millis(occurredAt);
     if (status != DeadLetterStatus.REPLAY_REQUESTED
         || lastReplayedAt == null
-        || occurredAt.isBefore(lastReplayedAt)) {
+        || at.isBefore(lastReplayedAt)) {
       return false;
     }
     switch (instructionStatus) {
@@ -194,7 +198,7 @@ public class DeadLetter {
         return false;
       }
     }
-    this.updatedAt = occurredAt;
+    this.updatedAt = at;
     return true;
   }
 

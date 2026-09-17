@@ -1,5 +1,6 @@
 package ca.musakaleem.remit.api.instruction;
 
+import ca.musakaleem.remit.api.messaging.EventTime;
 import ca.musakaleem.remit.common.event.Channel;
 import ca.musakaleem.remit.common.event.InstructionStatus;
 import jakarta.persistence.Column;
@@ -85,7 +86,7 @@ public class InstructionStatusHistory {
         detail == null || detail.length() <= InstructionRecord.MAX_DETAIL_LENGTH
             ? detail
             : detail.substring(0, InstructionRecord.MAX_DETAIL_LENGTH);
-    this.occurredAt = Objects.requireNonNull(occurredAt, "occurredAt");
+    this.occurredAt = EventTime.millis(Objects.requireNonNull(occurredAt, "occurredAt"));
   }
 
   public Long getId() {

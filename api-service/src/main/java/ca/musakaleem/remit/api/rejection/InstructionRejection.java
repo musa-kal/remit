@@ -1,5 +1,6 @@
 package ca.musakaleem.remit.api.rejection;
 
+import ca.musakaleem.remit.api.messaging.EventTime;
 import ca.musakaleem.remit.common.MaskingUtil;
 import ca.musakaleem.remit.common.event.InstructionRejected;
 import jakarta.persistence.Column;
@@ -70,7 +71,7 @@ public class InstructionRejection {
     List<String> codes = event.reasonCodes() == null ? List.of() : event.reasonCodes();
     this.reasonCodes = cut(String.join(SEPARATOR, codes), 500);
     this.rawLineMasked = MaskingUtil.maskAccountNumbers(event.rawLine());
-    this.occurredAt = Objects.requireNonNull(occurredAt, "occurredAt");
+    this.occurredAt = EventTime.millis(Objects.requireNonNull(occurredAt, "occurredAt"));
   }
 
   private static String cut(String value, int max) {

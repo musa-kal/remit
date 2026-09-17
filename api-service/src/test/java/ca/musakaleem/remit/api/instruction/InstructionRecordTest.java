@@ -60,6 +60,21 @@ class InstructionRecordTest {
   }
 
   @Test
+  void eventsWithinTheSameMillisecondAreComparedAtStoredPrecision() {
+    InstructionRecord row = routed(Instant.parse("2026-10-15T13:30:00.1236Z"));
+
+    boolean applied =
+        row.applyStatus(
+            InstructionStatus.REQUIRES_REVIEW,
+            Channel.WIRE,
+            null,
+            Instant.parse("2026-10-15T13:30:00.1231Z"));
+
+    assertThat(applied).isTrue();
+    assertThat(row.getUpdatedAt()).isEqualTo(Instant.parse("2026-10-15T13:30:00.123Z"));
+  }
+
+  @Test
   void aDuplicateNeverDowngradesARoutedInstruction() {
     InstructionRecord row = routed(T0);
 

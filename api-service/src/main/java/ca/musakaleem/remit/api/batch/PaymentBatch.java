@@ -1,5 +1,6 @@
 package ca.musakaleem.remit.api.batch;
 
+import ca.musakaleem.remit.api.messaging.EventTime;
 import ca.musakaleem.remit.common.event.BatchEvent;
 import ca.musakaleem.remit.common.event.BatchStatus;
 import jakarta.persistence.Column;
@@ -83,8 +84,8 @@ public class PaymentBatch {
   public static PaymentBatch from(BatchEvent event, String reasonCode) {
     PaymentBatch batch = new PaymentBatch();
     batch.batchId = Objects.requireNonNull(event.batchId(), "batchId").toString();
-    batch.receivedAt = Objects.requireNonNull(event.occurredAt(), "occurredAt");
-    batch.copy(event, reasonCode);
+    batch.receivedAt = EventTime.millis(Objects.requireNonNull(event.occurredAt(), "occurredAt"));
+    batch.copy(event, reasonCode, batch.receivedAt);
     return batch;
   }
 
@@ -96,18 +97,19 @@ public class PaymentBatch {
    * @return true when applied, false when ignored as older than the current state
    */
   public boolean apply(BatchEvent event, String reasonCode) {
-    if (event.occurredAt().isBefore(updatedAt)) {
+    Instant occurredAt = EventTime.millis(event.occurredAt());
+    if (occurredAt.isBefore(updatedAt)) {
       return false;
     }
     if (event.status() == BatchStatus.RECEIVED && status != BatchStatus.RECEIVED) {
       // A final status never goes back to RECEIVED, even with an equal timestamp.
       return false;
     }
-    copy(event, reasonCode);
+    copy(event, reasonCode, occurredAt);
     return true;
   }
 
-  private void copy(BatchEvent event, String reasonCode) {
+  private void copy(BatchEvent event, String reasonCode, Instant occurredAt) {
     this.clientId = event.clientId();
     this.fileName = event.fileName();
     this.fileHash = event.fileHash();
@@ -119,10 +121,10 @@ public class PaymentBatch {
       this.controlTotal = event.controlTotal();
     }
     if (event.status() != BatchStatus.RECEIVED) {
-      this.completedAt = event.occurredAt();
+      this.completedAt = occurredAt;
     }
     this.failureReason = event.status() == BatchStatus.FAILED ? reasonCode : null;
-    this.updatedAt = event.occurredAt();
+    this.updatedAt = occurredAt;
   }
 
   public UUID getBatchId() {
