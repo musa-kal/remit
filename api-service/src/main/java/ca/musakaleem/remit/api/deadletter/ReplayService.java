@@ -65,7 +65,8 @@ public class ReplayService {
             .orElseThrow(() -> new NotFoundException("Dead letter " + id + " not found"));
     deadLetter.requestReplay(maxReplays, clock.instant());
     PaymentInstruction stored = parser.readStored(deadLetter.getPayload());
-    publisher.publish(withReplayCount(stored, deadLetter.getReplayCount()));
+    publisher.publish(
+        withReplayCount(stored, deadLetter.getReplayCount()), deadLetter.getLastReplayedAt());
     log.info(
         "Replayed dead letter {} as replay {} of {}", id, deadLetter.getReplayCount(), maxReplays);
     return deadLetter;

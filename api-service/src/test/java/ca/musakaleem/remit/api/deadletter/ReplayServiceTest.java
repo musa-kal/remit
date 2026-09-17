@@ -42,7 +42,7 @@ class ReplayServiceTest {
       new ReplayService(
           repository,
           new DeadLetterRecordParser(),
-          new ReplayPublisher(kafka, clock, properties),
+          new ReplayPublisher(kafka, properties),
           clock,
           properties);
   private final PaymentInstruction instruction = TestEvents.instruction(UUID.randomUUID(), 0);

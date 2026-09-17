@@ -5,8 +5,8 @@ import ca.musakaleem.remit.common.Topics;
 import ca.musakaleem.remit.common.event.EventHeaders;
 import ca.musakaleem.remit.common.event.EventType;
 import ca.musakaleem.remit.common.event.PaymentInstruction;
-import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -24,20 +24,16 @@ import org.springframework.stereotype.Component;
 public class ReplayPublisher {
 
   private final KafkaTemplate<String, Object> kafkaTemplate;
-  private final Clock clock;
   private final Duration timeout;
 
   /**
    * Creates the publisher.
    *
    * @param kafkaTemplate template configured with acks=all and idempotence
-   * @param clock clock for the occurredAt header
    * @param properties provides the acknowledgement timeout
    */
-  public ReplayPublisher(
-      KafkaTemplate<String, Object> kafkaTemplate, Clock clock, ReplayProperties properties) {
+  public ReplayPublisher(KafkaTemplate<String, Object> kafkaTemplate, ReplayProperties properties) {
     this.kafkaTemplate = kafkaTemplate;
-    this.clock = clock;
     this.timeout = properties.publishTimeout();
   }
 
@@ -45,9 +41,10 @@ public class ReplayPublisher {
    * Publishes the instruction and waits for the acknowledgement.
    *
    * @param instruction the instruction with its new replay count
+   * @param requestedAt when the replay was requested, sent as the {@code occurredAt} header
    * @throws ServiceUnavailableException when Kafka does not acknowledge in time
    */
-  public void publish(PaymentInstruction instruction) {
+  public void publish(PaymentInstruction instruction, Instant requestedAt) {
     ProducerRecord<String, Object> record =
         EventHeaders.record(
             Topics.INSTRUCTIONS,
@@ -55,7 +52,7 @@ public class ReplayPublisher {
             instruction,
             EventType.PAYMENT_INSTRUCTION,
             instruction.batchId().toString(),
-            clock.instant());
+            requestedAt);
     try {
       kafkaTemplate.send(record).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (InterruptedException e) {
