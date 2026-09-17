@@ -1,0 +1,1261 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "description" : "Monitor payment batches, inspect rejected rows and dead letters, replay dead letters and read the audit trail. Log in with POST /api/v1/auth/login and send the token as Authorization: Bearer.",
+    "title" : "Remit operator API",
+    "version" : "v1"
+  },
+  "servers" : [ {
+    "url" : "http://localhost:8080",
+    "description" : "Local"
+  } ],
+  "security" : [ {
+    "bearerAuth" : [ ]
+  } ],
+  "tags" : [ {
+    "description" : "Counts by status",
+    "name" : "Stats"
+  }, {
+    "description" : "Dead-lettered instructions and their replay",
+    "name" : "Dead Letters"
+  }, {
+    "description" : "Instruction detail and status history",
+    "name" : "Instructions"
+  }, {
+    "description" : "The append-only audit trail",
+    "name" : "Audit"
+  }, {
+    "description" : "Batch files, their instructions and rejected rows",
+    "name" : "Batches"
+  }, {
+    "description" : "Obtain an access token",
+    "name" : "Auth"
+  } ],
+  "paths" : {
+    "/api/v1/audit-events" : {
+      "get" : {
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "entityId",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 0
+          }
+        }, {
+          "in" : "query",
+          "name" : "eventType",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "BATCH_RECEIVED", "BATCH_COMPLETED", "INSTRUCTION_ROUTED", "INSTRUCTION_STATUS_CHANGED", "INSTRUCTION_REJECTED", "INSTRUCTION_DEAD_LETTERED", "DEAD_LETTER_RECORDED", "DLT_REPLAY_REQUESTED", "LOGIN_SUCCESS", "LOGIN_FAILURE" ]
+          }
+        }, {
+          "example" : "2026-10-15T00:00:00Z",
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "example" : "2026-10-16T00:00:00Z",
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "description" : "Zero-based page index (0..N)",
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "description" : "The size of the page to be returned",
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 20,
+            "minimum" : 1
+          }
+        }, {
+          "description" : "Sorting criteria in the format: property,(asc|desc). Default sort order is ascending. Multiple sort criteria are supported.",
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "array",
+            "default" : [ "occurredAt,DESC" ],
+            "items" : {
+              "type" : "string"
+            }
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseAuditEventView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "List audit events, newest first",
+        "tags" : [ "Audit" ]
+      }
+    },
+    "/api/v1/auth/login" : {
+      "post" : {
+        "operationId" : "login",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description" : "Logged in"
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description" : "Missing username or password"
+          },
+          "401" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description" : "Invalid username or password"
+          },
+          "429" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description" : "Username locked after 5 failed logins"
+          }
+        },
+        "security" : [ ],
+        "summary" : "Log in and receive a bearer token valid for 15 minutes",
+        "tags" : [ "Auth" ]
+      }
+    },
+    "/api/v1/batches" : {
+      "get" : {
+        "operationId" : "list_1",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "RECEIVED", "COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED" ]
+          }
+        }, {
+          "in" : "query",
+          "name" : "clientId",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "pattern" : "[A-Z0-9]{3,10}"
+          }
+        }, {
+          "example" : "2026-10-15T00:00:00Z",
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "example" : "2026-10-16T00:00:00Z",
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "description" : "Zero-based page index (0..N)",
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "description" : "The size of the page to be returned",
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 20,
+            "minimum" : 1
+          }
+        }, {
+          "description" : "Sorting criteria in the format: property,(asc|desc). Default sort order is ascending. Multiple sort criteria are supported.",
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "array",
+            "default" : [ "receivedAt,DESC" ],
+            "items" : {
+              "type" : "string"
+            }
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseBatchView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "List batches, newest first",
+        "tags" : [ "Batches" ]
+      }
+    },
+    "/api/v1/batches/{batchId}" : {
+      "get" : {
+        "operationId" : "get_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "batchId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BatchDetailView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Batch detail with counts and control total",
+        "tags" : [ "Batches" ]
+      }
+    },
+    "/api/v1/batches/{batchId}/instructions" : {
+      "get" : {
+        "operationId" : "instructions",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "batchId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "ROUTED", "REQUIRES_REVIEW", "DUPLICATE", "DEAD_LETTERED", "REPLAYED" ]
+          }
+        }, {
+          "in" : "query",
+          "name" : "channel",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "EFT", "WIRE", "INTERAC" ]
+          }
+        }, {
+          "description" : "Zero-based page index (0..N)",
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "description" : "The size of the page to be returned",
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 20,
+            "minimum" : 1
+          }
+        }, {
+          "description" : "Sorting criteria in the format: property,(asc|desc). Default sort order is ascending. Multiple sort criteria are supported.",
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "array",
+            "default" : [ "instructionRef,ASC" ],
+            "items" : {
+              "type" : "string"
+            }
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseInstructionView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Instructions of a batch, account numbers masked",
+        "tags" : [ "Batches" ]
+      }
+    },
+    "/api/v1/batches/{batchId}/rejections" : {
+      "get" : {
+        "operationId" : "rejections",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "batchId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "Zero-based page index (0..N)",
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "description" : "The size of the page to be returned",
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 20,
+            "minimum" : 1
+          }
+        }, {
+          "description" : "Sorting criteria in the format: property,(asc|desc). Default sort order is ascending. Multiple sort criteria are supported.",
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "array",
+            "default" : [ "lineNumber,ASC" ],
+            "items" : {
+              "type" : "string"
+            }
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseRejectionView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Rejected rows of a batch with their reason codes",
+        "tags" : [ "Batches" ]
+      }
+    },
+    "/api/v1/dead-letters" : {
+      "get" : {
+        "operationId" : "list",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "REPLAY_REQUESTED", "REPLAYED", "EXHAUSTED" ]
+          }
+        }, {
+          "description" : "Zero-based page index (0..N)",
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "description" : "The size of the page to be returned",
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 20,
+            "minimum" : 1
+          }
+        }, {
+          "description" : "Sorting criteria in the format: property,(asc|desc). Default sort order is ascending. Multiple sort criteria are supported.",
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "array",
+            "default" : [ "firstSeenAt,DESC" ],
+            "items" : {
+              "type" : "string"
+            }
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseDeadLetterView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "List dead letters: key, exception, first seen, replay count, status",
+        "tags" : [ "Dead Letters" ]
+      }
+    },
+    "/api/v1/dead-letters/{id}/replay" : {
+      "post" : {
+        "operationId" : "replay",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description" : "Replay published"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description" : "Unknown dead letter"
+          },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description" : "Replayed 3 times already, a replay is pending, or the record is unreadable"
+          }
+        },
+        "summary" : "Republish a dead letter to payments.instructions with replayCount + 1",
+        "tags" : [ "Dead Letters" ]
+      }
+    },
+    "/api/v1/instructions/{idempotencyKey}" : {
+      "get" : {
+        "description" : "Account numbers are masked to the last four digits unless the caller is ADMIN",
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "idempotencyKey",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "pattern" : "[0-9a-f]{64}"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InstructionDetailView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Instruction detail and status history",
+        "tags" : [ "Instructions" ]
+      }
+    },
+    "/api/v1/stats/summary" : {
+      "get" : {
+        "operationId" : "summary",
+        "parameters" : [ {
+          "example" : "2026-10-15T00:00:00Z",
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "example" : "2026-10-16T00:00:00Z",
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatsSummary"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Counts by batch status and instruction status for a date range",
+        "tags" : [ "Stats" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "AuditEventView" : {
+        "type" : "object",
+        "properties" : {
+          "actor" : {
+            "type" : "string"
+          },
+          "correlationId" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          },
+          "entityId" : {
+            "type" : "string"
+          },
+          "entityType" : {
+            "type" : "string",
+            "enum" : [ "BATCH", "INSTRUCTION", "USER", "DEAD_LETTER" ]
+          },
+          "eventId" : {
+            "type" : "string"
+          },
+          "eventType" : {
+            "type" : "string",
+            "enum" : [ "BATCH_RECEIVED", "BATCH_COMPLETED", "INSTRUCTION_ROUTED", "INSTRUCTION_STATUS_CHANGED", "INSTRUCTION_REJECTED", "INSTRUCTION_DEAD_LETTERED", "DEAD_LETTER_RECORDED", "DLT_REPLAY_REQUESTED", "LOGIN_SUCCESS", "LOGIN_FAILURE" ]
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "occurredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "BatchDetailView" : {
+        "type" : "object",
+        "properties" : {
+          "acceptedRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "batchId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "completedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "controlTotal" : {
+            "type" : "number"
+          },
+          "deadLetterCount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "failureReason" : {
+            "type" : "string"
+          },
+          "fileHash" : {
+            "type" : "string"
+          },
+          "fileName" : {
+            "type" : "string"
+          },
+          "instructionsByStatus" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          },
+          "receivedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "rejectedRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "rejectionCount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "RECEIVED", "COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED" ]
+          },
+          "totalRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "BatchView" : {
+        "type" : "object",
+        "properties" : {
+          "acceptedRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "batchId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "completedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "controlTotal" : {
+            "type" : "number"
+          },
+          "failureReason" : {
+            "type" : "string"
+          },
+          "fileHash" : {
+            "type" : "string"
+          },
+          "fileName" : {
+            "type" : "string"
+          },
+          "receivedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "rejectedRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "RECEIVED", "COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED" ]
+          },
+          "totalRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "DeadLetterView" : {
+        "type" : "object",
+        "properties" : {
+          "batchId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "exceptionClass" : {
+            "type" : "string"
+          },
+          "exceptionMessage" : {
+            "type" : "string"
+          },
+          "firstSeenAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "idempotencyKey" : {
+            "type" : "string"
+          },
+          "lastReplayedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "originalOffset" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "originalPartition" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "originalTopic" : {
+            "type" : "string"
+          },
+          "replayCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "replayable" : {
+            "type" : "boolean"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "REPLAY_REQUESTED", "REPLAYED", "EXHAUSTED" ]
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "InstructionDetailView" : {
+        "type" : "object",
+        "properties" : {
+          "accountsMasked" : {
+            "type" : "boolean"
+          },
+          "amount" : {
+            "type" : "number"
+          },
+          "batchId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "channel" : {
+            "type" : "string",
+            "enum" : [ "EFT", "WIRE", "INTERAC" ]
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "creditor" : {
+            "$ref" : "#/components/schemas/PartyView"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "debtor" : {
+            "$ref" : "#/components/schemas/PartyView"
+          },
+          "history" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StatusHistoryView"
+            }
+          },
+          "idempotencyKey" : {
+            "type" : "string"
+          },
+          "instructionRef" : {
+            "type" : "string"
+          },
+          "remittanceInfo" : {
+            "type" : "string"
+          },
+          "replayCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ROUTED", "REQUIRES_REVIEW", "DUPLICATE", "DEAD_LETTERED", "REPLAYED" ]
+          },
+          "statusDetail" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "valueDate" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }
+      },
+      "InstructionView" : {
+        "type" : "object",
+        "properties" : {
+          "amount" : {
+            "type" : "number"
+          },
+          "batchId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "channel" : {
+            "type" : "string",
+            "enum" : [ "EFT", "WIRE", "INTERAC" ]
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "creditor" : {
+            "$ref" : "#/components/schemas/PartyView"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "debtor" : {
+            "$ref" : "#/components/schemas/PartyView"
+          },
+          "idempotencyKey" : {
+            "type" : "string"
+          },
+          "instructionRef" : {
+            "type" : "string"
+          },
+          "remittanceInfo" : {
+            "type" : "string"
+          },
+          "replayCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ROUTED", "REQUIRES_REVIEW", "DUPLICATE", "DEAD_LETTERED", "REPLAYED" ]
+          },
+          "statusDetail" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "valueDate" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }
+      },
+      "LoginRequest" : {
+        "type" : "object",
+        "properties" : {
+          "password" : {
+            "type" : "string",
+            "maxLength" : 200,
+            "minLength" : 0
+          },
+          "username" : {
+            "type" : "string",
+            "maxLength" : 50,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "password", "username" ]
+      },
+      "PageResponseAuditEventView" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AuditEventView"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PageResponseBatchView" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BatchView"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PageResponseDeadLetterView" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DeadLetterView"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PageResponseInstructionView" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/InstructionView"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PageResponseRejectionView" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RejectionView"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PartyView" : {
+        "type" : "object",
+        "properties" : {
+          "account" : {
+            "type" : "string"
+          },
+          "institution" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "transit" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RejectionView" : {
+        "type" : "object",
+        "properties" : {
+          "batchId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "instructionRef" : {
+            "type" : "string"
+          },
+          "lineNumber" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "occurredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "rawLine" : {
+            "type" : "string"
+          },
+          "reasonCodes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ReplayResponse" : {
+        "type" : "object",
+        "properties" : {
+          "batchId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "idempotencyKey" : {
+            "type" : "string"
+          },
+          "replayCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "requestedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "REPLAY_REQUESTED", "REPLAYED", "EXHAUSTED" ]
+          }
+        }
+      },
+      "StatsSummary" : {
+        "type" : "object",
+        "properties" : {
+          "batches" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          },
+          "deadLetters" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          },
+          "duplicateDeliveries" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "from" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "instructions" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          },
+          "rejectedRows" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "to" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "StatusHistoryView" : {
+        "type" : "object",
+        "properties" : {
+          "batchId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "channel" : {
+            "type" : "string",
+            "enum" : [ "EFT", "WIRE", "INTERAC" ]
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "occurredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ROUTED", "REQUIRES_REVIEW", "DUPLICATE", "DEAD_LETTERED", "REPLAYED" ]
+          }
+        }
+      },
+      "TokenResponse" : {
+        "type" : "object",
+        "properties" : {
+          "accessToken" : {
+            "type" : "string"
+          },
+          "expiresIn" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "tokenType" : {
+            "type" : "string"
+          }
+        }
+      }
+    },
+    "securitySchemes" : {
+      "bearerAuth" : {
+        "bearerFormat" : "JWT",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  }
+}
