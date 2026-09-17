@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import ca.musakaleem.remit.api.audit.AuditEntityType;
 import ca.musakaleem.remit.api.audit.AuditEvent;
 import ca.musakaleem.remit.api.audit.AuditEventType;
+import ca.musakaleem.remit.api.instruction.InstructionRecordRepository;
 import ca.musakaleem.remit.api.support.AbstractApiIT;
 import ca.musakaleem.remit.api.support.TestEvents;
 import ca.musakaleem.remit.common.Topics;
@@ -27,12 +28,18 @@ import java.util.Map;
 import java.util.UUID;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * The read model consumers end to end over Kafka: batch events, status events, routed records and
  * rejected rows, each writing exactly one audit document.
  */
 class ReadModelConsumersIT extends AbstractApiIT {
+
+  @Autowired InstructionRecordRepository instructions;
+
+  @Autowired TransactionTemplate transactions;
 
   private final Instant t0 = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
@@ -267,6 +274,28 @@ class ReadModelConsumersIT extends AbstractApiIT {
         .andExpect(jsonPath("$.content[0].lineNumber").value(4))
         .andExpect(jsonPath("$.content[0].instructionRef").value("ACME-0103"))
         .andExpect(jsonPath("$.content[0].reasonCodes[0]").value("INVALID_ACCOUNT"));
+  }
+
+  @Test
+  void claimingANewInstructionStoresTheStatusTimeInUtc() {
+    PaymentInstruction instruction = TestEvents.instruction(UUID.randomUUID(), 0);
+    Instant at = Instant.parse("2026-10-15T13:30:00.123Z");
+
+    transactions.executeWithoutResult(
+        tx ->
+            instructions.claim(
+                instruction.idempotencyKey(),
+                instruction.batchId(),
+                InstructionStatus.ROUTED,
+                null,
+                at.plusNanos(456_789)));
+
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%s.%f') FROM payment_instruction"
+                    + " WHERE idempotency_key = ?",
+                String.class, instruction.idempotencyKey()))
+        .isEqualTo("2026-10-15T13:30:00.123000");
   }
 
   private void publishBatch(BatchEvent event, org.apache.kafka.common.header.Header reasonCode) {
