@@ -58,6 +58,7 @@ routing-service defines the contract, api-service enforces the cap:
 - api-service refuses a replay when `replayCount >= 3` or when a replay is already pending (409). routing-service does not check the cap.
 - routing-service processes the replay normally. The ledger row is still `ROUTING` (or absent), so the replay is not a duplicate. On success it publishes `REPLAYED` (detail `replay <n>`) and then `ROUTED` or `REQUIRES_REVIEW`, both keyed by idempotency key and therefore in that order on one partition. If the replay fails again, it goes back to the DLT with the incremented `replayCount` in its payload.
 - Poison pills cannot be replayed usefully: their payload is not an instruction.
+- api-service keeps one dead letter per failed instruction across its replays and settles each replay from the status events; see [ADR 0010](0010-api-read-model.md#dead-letters).
 
 ## Consequences
 
