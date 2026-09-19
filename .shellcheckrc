@@ -1,0 +1,4 @@
+# ShellCheck settings for scripts/ (CI runs: shellcheck scripts/*.sh).
+# Follow "source" statements so helpers from scripts/lib.sh are checked with their callers.
+external-sources=true
+source-path=SCRIPTDIR
