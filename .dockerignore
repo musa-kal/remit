@@ -1,0 +1,43 @@
+# Build context for the three service Dockerfiles is the repository root. The images only need
+# the Maven poms and the sources of remit-common and the services; everything else stays out so
+# the context is small and a docs or script change never invalidates a build layer.
+
+# Build output and local state
+**/target/
+**/staging/
+**/node_modules/
+newman/
+*.log
+logs/
+
+# Version control, IDEs, OS files
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Secrets never go into an image
+.env
+*.env.local
+
+# Not part of any image
+docs/
+k8s/
+ci/
+postman/
+samples/
+scripts/
+docker/
+dashboard/
+Jenkinsfile
+docker-compose*.yml
+*.md
+**/Dockerfile
+.dockerignore
+.mvn/
+mvnw
+mvnw.cmd
