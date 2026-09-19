@@ -52,3 +52,59 @@ The duplicate `ACME-0003` gets one `DUPLICATE` status event with detail `already
 - Instructions published to `payments.instructions`: 31
 - Rows published to `payments.rejected`: 5
 - Expected routing statuses: 28 ROUTED, 2 REQUIRES_REVIEW, 1 DUPLICATE
+
+## What the API reports (api-service, M4)
+
+`scripts/smoke-test.sh` asserts these through the API after all five files have settled. Verified by hand against a local run of the three services on the compose infrastructure.
+
+### `GET /api/v1/stats/summary` (no range)
+
+```json
+{
+  "batches": {"RECEIVED": 0, "COMPLETED": 2, "COMPLETED_WITH_ERRORS": 1, "FAILED": 2},
+  "instructions": {"ROUTED": 28, "REQUIRES_REVIEW": 2, "DUPLICATE": 0, "DEAD_LETTERED": 0, "REPLAYED": 0},
+  "duplicateDeliveries": 1,
+  "rejectedRows": 5,
+  "deadLetters": {"PENDING": 0, "REPLAY_REQUESTED": 0, "REPLAYED": 0, "EXHAUSTED": 0}
+}
+```
+
+- 30 instruction rows, not 31: the duplicate `ACME-0003` never becomes a row of its own. It shows up as `duplicateDeliveries: 1`.
+- Settled means `batches.RECEIVED` is 0 and `ROUTED + REQUIRES_REVIEW` is 30.
+- No sample row uses `FORCE_FAIL`, so there are no dead letters.
+
+### Per batch (`GET /api/v1/batches?clientId=...`, then `GET /api/v1/batches/{batchId}`)
+
+| File | `status` | `totalRows` / `acceptedRows` / `rejectedRows` | `controlTotal` | `failureReason` | `instructionsByStatus` | `rejectionCount` |
+|---|---|---|---|---|---|---|
+| `PAY_ACME01_20261015093000.csv` | COMPLETED | 10 / 10 / 0 | 435730.74 | null | ROUTED 10 | 0 |
+| `PAY_ACME01_20261015100000.csv` | COMPLETED_WITH_ERRORS | 20 / 15 / 5 | 201918.42 | null | ROUTED 14 | 5 |
+| `PAY_ACME01_20261015110000.csv` | FAILED | 0 / 0 / 0 | null | DUPLICATE_FILE | all 0 | 0 |
+| `PAY_BETA02_20261015120000.csv` | FAILED | 4 / 0 / 0 | 54300.00 | CONTROL_TOTAL_MISMATCH | all 0 | 0 |
+| `PAY_BETA02_20261015130000.csv` | COMPLETED | 6 / 6 / 0 | 2514095.50 | null | ROUTED 4, REQUIRES_REVIEW 2 | 0 |
+
+`deadLetterCount` is 0 for every batch. `GET /batches?clientId=ACME01` returns 3 batches, `clientId=BETA02` 2. Batches are listed newest first (`receivedAt` desc); `receivedAt` is when intake-service received the file, not the time in the file name.
+
+### Rows and instructions
+
+- `GET /batches/{id}/rejections` of the 100000 file: 5 rows, lines 4, 7, 10, 14, 17 with the reason codes in the table above, account digits in `rawLine` masked to the last four.
+- `GET /batches/{id}/instructions` of the 100000 file: 14 instructions; `ACME-0003` is not among them because it belongs to the 093000 batch.
+- `GET /instructions/{key}` of `ACME-0003` (`key = sha256("ACME01|ACME-0003")`): status `ROUTED`, `batchId` of the 093000 file, history `ROUTED` (093000 batch) then `DUPLICATE` with detail `already ROUTED` and the batch id of the 100000 file.
+- Accounts are masked (`***0002`) for `operator`, and in full only for `admin` on `GET /instructions/{key}` (`accountsMasked: false`).
+
+### Audit trail (`GET /api/v1/audit-events`, admin)
+
+- Per accepted batch: one `BATCH_RECEIVED` and one `BATCH_COMPLETED` with `entityId` = batch id; the two FAILED files have only a `BATCH_COMPLETED` (`details.status` FAILED, `details.reasonCode`).
+- Five `INSTRUCTION_REJECTED` documents with `entityId` = the 100000 batch id.
+- Per instruction: one `INSTRUCTION_ROUTED` (routed record) and one `INSTRUCTION_STATUS_CHANGED` per status event; `ACME-0003` has two of the latter (ROUTED, DUPLICATE).
+- Every login writes `LOGIN_SUCCESS` or `LOGIN_FAILURE` with actor `user:<username>`.
+
+### Dead letters and replay with the chaos hook on (compose)
+
+Not part of the sample set; a one-row file with `remittance_info` = `FORCE_FAIL` (the `docker` profile enables the chaos hook) gives:
+
+1. About 3 s after routing: `GET /dead-letters` lists 1 dead letter, `status` PENDING, `replayCount` 0, `replayable` true, `exceptionClass` `ca.musakaleem.remit.routing.error.RoutingException`. The instruction is `DEAD_LETTERED`.
+2. `POST /dead-letters/{id}/replay` as admin: 202, `status` REPLAY_REQUESTED, `replayCount` 1. A second replay right away: 409 (pending).
+3. The replay fails again (chaos is still on); after about 5 s the same dead letter (still 1 row) is PENDING with `replayCount` 1.
+4. After the third replay fails it is EXHAUSTED with `replayCount` 3, and a fourth replay is 409 `Dead letter <id> reached the limit of 3 replays`.
+5. The instruction ends `DEAD_LETTERED` with `replayCount` 3 and four `DEAD_LETTERED` history entries; the audit trail has three `DLT_REPLAY_REQUESTED` documents with actor `user:admin`.
