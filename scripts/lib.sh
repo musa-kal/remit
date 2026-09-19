@@ -71,9 +71,11 @@ load_env() {
   done <"${file}"
 }
 
-# compose <args>: docker compose for this repository, whatever the current directory is.
+# compose <args>: docker compose for this repository, whatever the current directory is. It runs
+# from the repository root instead of passing -f <path>, because with MSYS_NO_PATHCONV set a Git
+# Bash path such as /c/Users/... would reach docker.exe unconverted.
 compose() {
-  docker compose --project-directory "${REMIT_ROOT}" -f "${REMIT_ROOT}/docker-compose.yml" "$@"
+  (cd "${REMIT_ROOT}" && docker compose "$@")
 }
 
 # service_state <service>: prints "<state> <health>" of the compose service's container
@@ -86,9 +88,13 @@ service_state() {
 
 # print_status [service...]: one line per service with its state and health.
 print_status() {
-  local svc
+  local svc state
   for svc in "$@"; do
-    printf '  %-16s %s\n' "${svc}" "$(service_state "${svc}")" >&2
+    state="$(service_state "${svc}")"
+    if [[ "${state}" == exited* ]]; then
+      state="exited (code $(compose ps -a --format '{{.ExitCode}}' "${svc}" | head -n 1))"
+    fi
+    printf '  %-16s %s\n' "${svc}" "${state}" >&2
   done
 }
 
