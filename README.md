@@ -291,7 +291,7 @@ Run intake-service and routing-service next to it and drop the samples; [docs/e2
 - [x] M1 Local infra: MySQL (3 schemas), MongoDB, Kafka and topics, SFTP via Docker Compose
 - [x] M2 Common + intake: event records, masking and idempotency utilities, Spring Batch intake
 - [x] M3 Routing: idempotent consumer, retries, dead-letter topic
-- [ ] M4 API + security + audit: REST endpoints, JWT and roles, MongoDB audit trail, DLT replay
+- [x] M4 API + security + audit: REST endpoints, JWT and roles, MongoDB audit trail, DLT replay
 - [ ] M5 Containers + E2E: Dockerfiles, full compose stack, smoke test, measured throughput
 - [ ] M6 Postman: collection and environments, Newman run
 - [ ] M7 CI: Jenkins and SonarQube, quality gate
