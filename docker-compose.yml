@@ -169,6 +169,8 @@ services:
     image: remit/intake-service:${REMIT_IMAGE_TAG:-latest}
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      # Keeps container logs pure JSON (scripts/logs.sh pretty-prints them with jq).
+      SPRING_MAIN_BANNER_MODE: "off"
       REMIT_INTAKE_DB_PASSWORD: ${REMIT_INTAKE_DB_PASSWORD:?set REMIT_INTAKE_DB_PASSWORD in .env}
       REMIT_SFTP_USER: ${REMIT_SFTP_USER:-remit}
       REMIT_SFTP_PASSWORD: ${REMIT_SFTP_PASSWORD:?set REMIT_SFTP_PASSWORD in .env}
@@ -206,6 +208,8 @@ services:
     image: remit/routing-service:${REMIT_IMAGE_TAG:-latest}
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      # Keeps container logs pure JSON (scripts/logs.sh pretty-prints them with jq).
+      SPRING_MAIN_BANNER_MODE: "off"
       REMIT_ROUTING_DB_PASSWORD: ${REMIT_ROUTING_DB_PASSWORD:?set REMIT_ROUTING_DB_PASSWORD in .env}
     ports:
       - "${REMIT_ROUTING_PORT:-8082}:8082"
@@ -232,6 +236,8 @@ services:
     image: remit/api-service:${REMIT_IMAGE_TAG:-latest}
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      # Keeps container logs pure JSON (scripts/logs.sh pretty-prints them with jq).
+      SPRING_MAIN_BANNER_MODE: "off"
       REMIT_API_DB_PASSWORD: ${REMIT_API_DB_PASSWORD:?set REMIT_API_DB_PASSWORD in .env}
       REMIT_MONGO_USER: ${REMIT_MONGO_USER:-remit_audit}
       REMIT_MONGO_PASSWORD: ${REMIT_MONGO_PASSWORD:?set REMIT_MONGO_PASSWORD in .env}
