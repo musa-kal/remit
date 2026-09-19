@@ -130,4 +130,77 @@ docker compose exec mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e \
 
 ### Replay
 
-Replay goes through api-service (`POST /api/v1/dead-letters/{id}/replay`, role ADMIN), which republishes the payload with `replayCount + 1` and refuses once `replayCount` reaches 3. routing-service then publishes `REPLAYED` followed by `ROUTED` or `REQUIRES_REVIEW`.
+Replay goes through api-service; see [Replay a DLT message](#replay-a-dlt-message).
+
+## Replay a DLT message
+
+api-service stores every record of `payments.instructions.DLT` as a dead letter and replays it on request: it republishes the stored instruction to `payments.instructions` with `replayCount + 1`, exactly as intake-service would publish it, and routing-service processes it again. Only the ADMIN role can replay, each dead letter at most 3 times, and every replay is audited with the administrator's username. [ADR 0003](decisions/0003-dlt-and-replay.md) and [ADR 0010](decisions/0010-api-read-model.md#dead-letters) have the details.
+
+### 1. Find the dead letter
+
+```bash
+set -a; . ./.env; set +a
+TOKEN=$(curl -s -X POST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d "{\"username\":\"admin\",\"password\":\"$REMIT_ADMIN_PASSWORD\"}" | jq -r .accessToken)
+curl -s "localhost:8080/api/v1/dead-letters?status=PENDING" -H "Authorization: Bearer $TOKEN" \
+  | jq '.content[] | {id, idempotencyKey, exceptionClass, exceptionMessage, replayCount, replayable}'
+```
+
+### 2. Decide whether a replay can succeed
+
+Read `exceptionClass` as in [Why did it fail?](#why-did-it-fail): replay only after fixing a temporary cause (`RoutingException`). A `NonRetryableRoutingException` fails again, and an unreadable record (`idempotencyKey` is `null`, `replayable` is `false`) cannot be replayed at all.
+
+The chaos hook fails every attempt of a `FORCE_FAIL` instruction while `remit.routing.chaos-enabled` is true (the `local` and `docker` profiles), so replaying one in compose fails again by design; that is how the demo reaches the cap.
+
+### 3. Replay
+
+```bash
+curl -s -X POST localhost:8080/api/v1/dead-letters/1/replay -H "Authorization: Bearer $TOKEN" | jq
+```
+
+`202` with `"status": "REPLAY_REQUESTED"` and the new `replayCount` means the instruction is back on `payments.instructions`. Other answers:
+
+| Status | Meaning |
+|---|---|
+| 409 `A replay of dead letter 1 is already pending` | Wait for routing-service's outcome (a few seconds; a failing replay takes about 3 s of retries) |
+| 409 `... reached the limit of 3 replays` | The dead letter is now EXHAUSTED; the client has to send a corrected instruction |
+| 409 `... was already replayed successfully` | Nothing to do |
+| 409 `... holds an unreadable record` | Poison pill; find the producer that wrote it |
+| 404 | Wrong id |
+| 503 | Kafka did not acknowledge; nothing changed, try again |
+
+### 4. Check the outcome
+
+```bash
+curl -s "localhost:8080/api/v1/dead-letters?status=REPLAYED" -H "Authorization: Bearer $TOKEN" | jq '.content[].id'
+curl -s "localhost:8080/api/v1/instructions/<idempotencyKey>" -H "Authorization: Bearer $TOKEN" \
+  | jq '{status, replayCount, history: [.history[] | .status]}'
+```
+
+After a successful replay the dead letter is `REPLAYED` and the instruction's history ends with `REPLAYED`, `ROUTED` (or `REQUIRES_REVIEW`). After a failed one the dead letter is `PENDING` again, or `EXHAUSTED` after the third replay, and the history ends with another `DEAD_LETTERED`. The audit trail shows who replayed it:
+
+```bash
+curl -s "localhost:8080/api/v1/audit-events?entityId=<idempotencyKey>&eventType=DLT_REPLAY_REQUESTED" \
+  -H "Authorization: Bearer $TOKEN" | jq '.content[] | {actor, occurredAt, details}'
+```
+
+## Rotate the JWT secret
+
+api-service signs tokens with one HS256 key, `REMIT_JWT_SECRET` ([ADR 0004](decisions/0004-jwt-approach.md)). Rotate it when it may have leaked, and as routine hygiene. Rotation invalidates every issued token immediately: callers get 401 `The access token is invalid` and must log in again, at most 15 minutes of tokens are affected.
+
+1. Generate a new secret of at least 32 bytes:
+
+   ```bash
+   openssl rand -base64 48
+   ```
+
+2. Replace the value:
+   - compose or a local run: set `REMIT_JWT_SECRET` in `.env`;
+   - Kubernetes: update the `remit` Secret (`scripts/k8s-secrets.sh` rebuilds it from `.env`).
+3. Restart every api-service instance so they all sign and verify with the new key:
+   - compose: `docker compose up -d api-service` (recreates the container with the new environment);
+   - Kubernetes: `kubectl -n remit rollout restart deployment/api-service` and wait for `kubectl -n remit rollout status deployment/api-service`;
+   - local jar: stop it and start it again after `set -a; . ./.env; set +a`.
+4. Check: `curl -s localhost:8080/actuator/health/readiness` is `UP`, a login returns a token, and an old token now gets 401.
+
+If api-service does not start, its log says why: `REMIT_JWT_SECRET is not set` or `REMIT_JWT_SECRET is N bytes long; HS256 needs at least 32 bytes`.
