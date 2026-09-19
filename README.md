@@ -61,7 +61,9 @@ Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_
 | `docker-compose.yml` | Local infrastructure stack |
 | `samples/` | The five sample batch files (see [Intake](#intake-service)) |
 | `scripts/` | Bash ops scripts (`gen-batch.sh` so far) |
-| `docs/runbook.md` | Operational procedures (restart a failed batch job, inspect the DLT) |
+| `docs/api.md` | Operator API reference: endpoints, auth flow, examples, error format |
+| `docs/openapi.json` | OpenAPI document exported by the build |
+| `docs/runbook.md` | Operational procedures (restart a failed batch job, inspect and replay the DLT, rotate the JWT secret) |
 | `docs/e2e-expectations.md` | Expected outcome of every sample file |
 | `docs/decisions/` | Architecture decision records |
 
@@ -225,6 +227,63 @@ curl -s localhost:8082/actuator/health    # db and kafka components, both UP
 ```
 
 Run intake-service next to it and drop a sample file (see above); `docs/e2e-expectations.md` lists the routing outcome of every sample instruction.
+
+## api-service
+
+api-service gives operators a JWT-secured REST API over a read model it builds from Kafka, writes an append-only audit trail to MongoDB, and replays dead letters. The full reference, with curl examples, is [docs/api.md](docs/api.md); Swagger UI runs at `http://localhost:8080/swagger-ui.html`.
+
+### Endpoints (`/api/v1`)
+
+| Method | Path | Role |
+|---|---|---|
+| POST | `/auth/login` | public |
+| GET | `/batches`, `/batches/{batchId}`, `/batches/{batchId}/instructions`, `/batches/{batchId}/rejections` | OPERATOR |
+| GET | `/instructions/{idempotencyKey}` | OPERATOR (full account numbers for ADMIN only) |
+| GET | `/dead-letters` | OPERATOR |
+| POST | `/dead-letters/{id}/replay` | ADMIN |
+| GET | `/audit-events` | ADMIN |
+| GET | `/stats/summary` | OPERATOR |
+
+Lists are paged (`page`, `size` up to 100, larger sizes are clamped to 100, `sort`) and return `{content, page, size, totalElements, totalPages}`. Every error is an RFC 7807 ProblemDetail without stack traces: 400 with field errors, 401 without a valid token, 403 for the wrong role, 404, 409 for a refused replay, 429 for a locked login.
+
+### Security
+
+- `POST /auth/login` returns an HS256 JWT (jjwt) valid for 15 minutes with claims `sub`, `roles`, `iat`, `exp`, `jti`. The key is `REMIT_JWT_SECRET`; api-service does not start without one of at least 32 bytes.
+- Stateless filter chain; roles are checked per endpoint with `@PreAuthorize`. Users live in MySQL with BCrypt hashes.
+- In the `local` and `docker` profiles api-service creates `operator` (OPERATOR) and `admin` (OPERATOR, ADMIN) at startup from `REMIT_OPERATOR_PASSWORD` and `REMIT_ADMIN_PASSWORD` if they do not exist.
+- Five failed logins for a username within 10 minutes lock it for 10 minutes (in memory, per instance).
+- Account numbers are masked to the last four digits in every response and audit document, except the instruction detail for ADMIN.
+
+[ADR 0004](docs/decisions/0004-jwt-approach.md) explains the choices.
+
+### Read model
+
+Consumer group `api-service` reads `payments.batch-events`, `payments.status-events`, `payments.rejected`, `payments.instructions.DLT` (as raw bytes, since a poison pill is not JSON) and the three `payments.routed.*` topics (for the payment details of routed instructions) into schema `remit_api`. Upserts are keyed by natural key and ignore events that happened strictly before the stored state, so redelivery and reordering are harmless; a duplicate delivery never downgrades an instruction but is kept in its status history. Dead letters are deduplicated by original topic, partition and offset. See [ADR 0010](docs/decisions/0010-api-read-model.md).
+
+### Audit trail
+
+Every consumed record and every operator action (login, replay) writes one document to `remit_audit.audit_events`, with actor `system:api-service` or `user:<username>`. The unique index on `eventId` makes a redelivered event a no-op; the code only ever inserts (`MongoTemplate.insert`), and the compose MongoDB user may only find and insert. Types and ids: [ADR 0009](docs/decisions/0009-audit-event-types.md).
+
+### Replay
+
+`POST /api/v1/dead-letters/{id}/replay` (ADMIN) republishes the stored instruction to `payments.instructions` with `replayCount + 1`, keyed by debtor account with the five standard headers, marks the dead letter `REPLAY_REQUESTED` and audits `DLT_REPLAY_REQUESTED` with the administrator's name. routing-service's status events then mark it `REPLAYED`, or `PENDING` again if it failed. A replay is refused with 409 while one is pending and once a dead letter has been replayed 3 times (it becomes `EXHAUSTED`). Walkthrough: [Replay a DLT message](docs/runbook.md#replay-a-dlt-message).
+
+### Run it locally
+
+With the compose infrastructure up and `.env` filled in:
+
+```bash
+./mvnw -B -q package -pl api-service -am -DskipTests
+set -a; . ./.env; set +a
+java -jar api-service/target/api-service-0.1.0.jar --spring.profiles.active=local
+
+curl -s localhost:8080/actuator/health    # db, mongo and kafka components, all UP
+TOKEN=$(curl -s -X POST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d "{\"username\":\"operator\",\"password\":\"$REMIT_OPERATOR_PASSWORD\"}" | jq -r .accessToken)
+curl -s localhost:8080/api/v1/stats/summary -H "Authorization: Bearer $TOKEN"
+```
+
+Run intake-service and routing-service next to it and drop the samples; [docs/e2e-expectations.md](docs/e2e-expectations.md) lists what the API should then report. The build (`./mvnw -B verify`) regenerates [docs/openapi.json](docs/openapi.json) from the running application.
 
 ## Status
 
