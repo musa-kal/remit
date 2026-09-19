@@ -1,4 +1,5 @@
-# Remit local stack. Copy .env.example to .env first, then: docker compose up -d
+# Remit stack: infrastructure plus the three services. Copy .env.example to .env first, then:
+#   docker compose up -d --build     (or scripts/deploy.sh compose)
 # Optional tools (Kafka UI): docker compose --profile tools up -d
 
 name: remit
@@ -155,17 +156,108 @@ services:
       kafka:
         condition: service_healthy
 
-  # --- Application services (placeholders, added in M5) --------------------------
-  # Each service gets a HEALTHCHECK on /actuator/health and these depends_on rules:
-  #   intake-service:  mysql (service_healthy), sftp (service_healthy),
-  #                    kafka-init (service_completed_successfully)
-  #                    env: REMIT_INTAKE_DB_PASSWORD, REMIT_SFTP_*, kafka:9092
-  #   routing-service: mysql (service_healthy), kafka-init (service_completed_successfully)
-  #                    env: REMIT_ROUTING_DB_PASSWORD, kafka:9092
-  #   api-service:     mysql (service_healthy), mongo (service_healthy),
-  #                    kafka-init (service_completed_successfully)
-  #                    env: REMIT_API_DB_PASSWORD, REMIT_MONGO_*, REMIT_JWT_SECRET,
-  #                    REMIT_OPERATOR_PASSWORD, REMIT_ADMIN_PASSWORD, kafka:9092
+  # --- Application services ------------------------------------------------------
+  # Built from the repository root (the Dockerfiles need the parent pom and remit-common).
+  # Only the variables each service needs are passed in; .env is not used as an env_file because
+  # its REMIT_*_HOST and Kafka values point at localhost for services run outside compose. The
+  # docker profile defaults to the compose service names (mysql:3306, mongo:27017, kafka:9092, sftp:22).
+
+  intake-service:
+    build:
+      context: .
+      dockerfile: intake-service/Dockerfile
+    image: remit/intake-service:${REMIT_IMAGE_TAG:-latest}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      REMIT_INTAKE_DB_PASSWORD: ${REMIT_INTAKE_DB_PASSWORD:?set REMIT_INTAKE_DB_PASSWORD in .env}
+      REMIT_SFTP_USER: ${REMIT_SFTP_USER:-remit}
+      REMIT_SFTP_PASSWORD: ${REMIT_SFTP_PASSWORD:?set REMIT_SFTP_PASSWORD in .env}
+      REMIT_SFTP_POLL_INTERVAL: ${REMIT_SFTP_POLL_INTERVAL:-30s}
+      REMIT_STAGING_DIR: /app/staging
+      # Pins the business date so the committed samples always validate (ADR 0005). Unset means
+      # 2026-10-15; an empty REMIT_CLOCK_FIXED_DATE= in .env means the real date.
+      REMIT_CLOCK_FIXED_DATE: ${REMIT_CLOCK_FIXED_DATE-2026-10-15}
+    ports:
+      - "${REMIT_INTAKE_PORT:-8081}:8081"
+    volumes:
+      - intake-staging:/app/staging
+    networks:
+      - remit
+    depends_on:
+      mysql:
+        condition: service_healthy
+      sftp:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/actuator/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+      start_interval: 3s
+
+  routing-service:
+    build:
+      context: .
+      dockerfile: routing-service/Dockerfile
+    image: remit/routing-service:${REMIT_IMAGE_TAG:-latest}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      REMIT_ROUTING_DB_PASSWORD: ${REMIT_ROUTING_DB_PASSWORD:?set REMIT_ROUTING_DB_PASSWORD in .env}
+    ports:
+      - "${REMIT_ROUTING_PORT:-8082}:8082"
+    networks:
+      - remit
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8082/actuator/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+      start_interval: 3s
+
+  api-service:
+    build:
+      context: .
+      dockerfile: api-service/Dockerfile
+    image: remit/api-service:${REMIT_IMAGE_TAG:-latest}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      REMIT_API_DB_PASSWORD: ${REMIT_API_DB_PASSWORD:?set REMIT_API_DB_PASSWORD in .env}
+      REMIT_MONGO_USER: ${REMIT_MONGO_USER:-remit_audit}
+      REMIT_MONGO_PASSWORD: ${REMIT_MONGO_PASSWORD:?set REMIT_MONGO_PASSWORD in .env}
+      REMIT_JWT_SECRET: ${REMIT_JWT_SECRET:?set REMIT_JWT_SECRET in .env}
+      REMIT_OPERATOR_PASSWORD: ${REMIT_OPERATOR_PASSWORD:?set REMIT_OPERATOR_PASSWORD in .env}
+      REMIT_ADMIN_PASSWORD: ${REMIT_ADMIN_PASSWORD:?set REMIT_ADMIN_PASSWORD in .env}
+      REMIT_SEED_USERS_ENABLED: ${REMIT_SEED_USERS_ENABLED:-true}
+    ports:
+      - "${REMIT_API_PORT:-8080}:8080"
+    networks:
+      - remit
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+      start_interval: 3s
 
 networks:
   remit:
@@ -176,3 +268,4 @@ volumes:
   mongo-data:
   kafka-data:
   sftp-data:
+  intake-staging:
