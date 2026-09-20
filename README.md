@@ -250,9 +250,10 @@ curl -s localhost:8081/actuator/ingestjobs      # recent job executions
 ```bash
 scripts/gen-batch.sh -o /tmp ACME01 10000     # prints /tmp/PAY_ACME01_<timestamp>.csv
 VALUE_DATE=2026-10-15 scripts/gen-batch.sh LOAD01 500
+scripts/gen-batch.sh -r FORCE_FAIL CHAOS01 1  # every row fails in routing-service (chaos hook)
 ```
 
-The script writes a valid file with rows spread over the three channels within their limits, a control total summed in integer cents, and value date tomorrow in America/Toronto unless `VALUE_DATE` is set. Run `scripts/gen-batch.sh -h` for all options. It needs GNU or BSD `date` with time zone data.
+The script writes a valid file with rows spread over the three channels within their limits and a control total summed in integer cents. The value date is `VALUE_DATE` if set, else `REMIT_CLOCK_FIXED_DATE` if set (compose pins 2026-10-15, where tomorrow's real date would be in the past), else tomorrow in America/Toronto. `-r TEXT` sets the remittance info of every row. Run `scripts/gen-batch.sh -h` for all options. It needs GNU or BSD `date` with time zone data.
 
 ## routing-service
 
