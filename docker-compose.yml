@@ -9,6 +9,10 @@ services:
 
   mysql:
     image: mysql:8.4
+    # Local-stack durability trade-off: flush the redo log to disk once a second instead of on every
+    # commit, and do not fsync the binary log. A MySQL crash can lose the last second of commits; on
+    # Docker Desktop each fsync is slow enough to cap routing at about 100 instructions a second.
+    command: ["mysqld", "--innodb-flush-log-at-trx-commit=2", "--sync-binlog=0"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
       TZ: UTC
