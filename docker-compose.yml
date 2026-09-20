@@ -178,7 +178,9 @@ services:
       REMIT_INTAKE_DB_PASSWORD: ${REMIT_INTAKE_DB_PASSWORD:?set REMIT_INTAKE_DB_PASSWORD in .env}
       REMIT_SFTP_USER: ${REMIT_SFTP_USER:-remit}
       REMIT_SFTP_PASSWORD: ${REMIT_SFTP_PASSWORD:?set REMIT_SFTP_PASSWORD in .env}
-      REMIT_SFTP_POLL_INTERVAL: ${REMIT_SFTP_POLL_INTERVAL:-30s}
+      # The service default is 30s (FR-INT-01); the local stack polls faster so a dropped file is
+      # picked up within seconds (NFR-05 is measured from the upload).
+      REMIT_SFTP_POLL_INTERVAL: ${REMIT_SFTP_POLL_INTERVAL:-10s}
       REMIT_STAGING_DIR: /app/staging
       # Pins the business date so the committed samples always validate (ADR 0005). Unset means
       # 2026-10-15; an empty REMIT_CLOCK_FIXED_DATE= in .env means the real date.
