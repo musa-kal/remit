@@ -147,10 +147,41 @@ All scripts take `-h` for help, use `set -euo pipefail`, read `.env`, and pass `
 | `scripts/seed-sftp.sh [file...]` | Uploads files (default: `samples/*.csv`) to `/inbound`. Default transport streams them into the compose `sftp` container (needs only the docker CLI); `--via sftp` uses `sftp` and `sshpass` like a real client |
 | `scripts/logs.sh <service>` | Follows a service's JSON logs, pretty-printed with jq (`-c` compact, `--no-follow`, `-n LINES`) |
 | `scripts/gen-batch.sh <clientId> <rows>` | Generates a valid batch file; `-r FORCE_FAIL` makes every row fail in routing |
-| `scripts/smoke-test.sh` | End-to-end test of the samples and a dead-letter replay |
+| `scripts/smoke-test.sh` | End-to-end test of the samples and a dead-letter replay ([Sample walkthrough](#sample-walkthrough)) |
 | `scripts/perf-test.sh` | NFR-05 measurement with a 10,000-row file ([Measured performance](#measured-performance)) |
 
 Every file lands in `/inbound` under a hidden `.part` name and is renamed once complete, so the poller never reads a partial upload.
+
+## Sample walkthrough
+
+After `scripts/deploy.sh compose` and `scripts/seed-sftp.sh`, intake-service picks the five files up on its next poll (within 10 s) in file name order, and the API has settled a few seconds later. `scripts/smoke-test.sh` checks all of the following automatically (70 checks); to look yourself:
+
+```bash
+set -a; . ./.env; set +a
+TOKEN=$(curl -s -X POST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d "{\"username\":\"operator\",\"password\":\"$REMIT_OPERATOR_PASSWORD\"}" | jq -r .accessToken)
+curl -s localhost:8080/api/v1/stats/summary -H "Authorization: Bearer $TOKEN" | jq
+curl -s "localhost:8080/api/v1/batches?clientId=ACME01" -H "Authorization: Bearer $TOKEN" | jq '.content[] | {fileName, status, totalRows, acceptedRows, rejectedRows, failureReason}'
+```
+
+| File | What it exercises | What the API shows |
+|---|---|---|
+| `PAY_ACME01_20261015093000.csv` | The happy path: 10 valid rows over EFT, WIRE and INTERAC | Batch `COMPLETED`, 10/10 accepted, 10 instructions `ROUTED`; the file moves to `/processed` |
+| `PAY_ACME01_20261015100000.csv` | Row-level validation: 20 rows, one invalid account, amount, currency, value date and INTERAC limit; one row repeats `ACME-0003` from the first file | Batch `COMPLETED_WITH_ERRORS`, 15 accepted, 5 rejected; `/batches/{id}/rejections` lists lines 4, 7, 10, 14, 17 with their reason codes and masked accounts; 14 instructions `ROUTED`, because routing-service recognises `ACME-0003` as a duplicate (`duplicateDeliveries: 1`, and its history on `/instructions/{key}` ends with `DUPLICATE`, detail `already ROUTED`) |
+| `PAY_ACME01_20261015110000.csv` | Duplicate file: byte-identical to the first file | Batch `FAILED` with `failureReason: DUPLICATE_FILE` and no rows; the file moves to `/error` next to a `.error.txt` note |
+| `PAY_BETA02_20261015120000.csv` | File-level validation: the trailer's control total is 100.00 too high | Batch `FAILED` with `failureReason: CONTROL_TOTAL_MISMATCH`, 4 rows read, none published; `/error` |
+| `PAY_BETA02_20261015130000.csv` | Review path and client-scoped keys: two WIREs of 1,000,000.00 or more; reuses the reference `ACME-0001`, which is a new instruction for another client | Batch `COMPLETED`, 4 `ROUTED` and 2 `REQUIRES_REVIEW` |
+
+Totals (`GET /api/v1/stats/summary`): batches 2 `COMPLETED`, 1 `COMPLETED_WITH_ERRORS`, 2 `FAILED`; instructions 28 `ROUTED`, 2 `REQUIRES_REVIEW`; `rejectedRows` 5; `duplicateDeliveries` 1; no dead letters. Every batch event, rejection and status change is also in the audit trail (`GET /api/v1/audit-events`, admin). The full table, including the Kafka side, is [docs/e2e-expectations.md](docs/e2e-expectations.md).
+
+To see a dead letter and a replay, drop a file whose remittance info trips the chaos hook:
+
+```bash
+scripts/seed-sftp.sh "$(REMIT_CLOCK_FIXED_DATE=2026-10-15 scripts/gen-batch.sh -o /tmp -r FORCE_FAIL CHAOS01 1)"
+curl -s "localhost:8080/api/v1/dead-letters?status=PENDING" -H "Authorization: Bearer $TOKEN" | jq '.content[] | {id, status, replayCount}'
+```
+
+After three attempts (about 3 s) the instruction is `DEAD_LETTERED` and a `PENDING` dead letter appears. A replay by `admin` (`POST /api/v1/dead-letters/{id}/replay`) answers 202, a second one while it is pending 409; the replay fails again because the hook is still on, the dead letter returns to `PENDING` with `replayCount` 1, and after the third replay it is `EXHAUSTED`. See [Replay a DLT message](docs/runbook.md#replay-a-dlt-message).
 
 ## intake-service
 
