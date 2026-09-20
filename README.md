@@ -58,9 +58,10 @@ Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_
 | `routing-service/` | Idempotent Kafka consumer, channel routing, retries and the dead-letter topic |
 | `api-service/` | Operator REST API, security, read model, audit writer |
 | `docker/` | Init scripts for MySQL, MongoDB and Kafka topics used by compose |
-| `docker-compose.yml` | Local infrastructure stack |
+| `docker-compose.yml` | Local stack: infrastructure and the three services |
+| `*/Dockerfile` | Multi-stage image build of each service |
 | `samples/` | The five sample batch files (see [Intake](#intake-service)) |
-| `scripts/` | Bash ops scripts (`gen-batch.sh` so far) |
+| `scripts/` | Bash ops scripts: build, deploy, restart, seed SFTP, logs, smoke and performance tests |
 | `docs/api.md` | Operator API reference: endpoints, auth flow, examples, error format |
 | `docs/openapi.json` | OpenAPI document exported by the build |
 | `docs/runbook.md` | Operational procedures (restart a failed batch job, inspect and replay the DLT, rotate the JWT secret) |
@@ -81,22 +82,34 @@ The JaCoCo check fails any module whose line coverage drops below 80%.
 
 ## Quick start
 
-Prerequisites: Docker with Compose v2 and JDK 17. The application services join the compose stack in a later milestone; today compose runs the infrastructure they need.
+Prerequisites: Docker with Compose v2, Bash (Git Bash works on Windows), `curl` and `jq`. JDK 17 is only needed to build and test outside Docker; the images compile the code themselves.
 
 ```bash
-cp .env.example .env        # then replace every change-me value
-docker compose up -d        # MySQL, MongoDB, Kafka (+ topics), SFTP
-docker compose ps           # four services healthy, kafka-init "Exited (0)"
-docker compose --profile tools up -d kafka-ui   # optional Kafka UI on http://localhost:8090
-docker compose down -v      # stop everything and delete all data volumes
+git clone https://github.com/Musa-Kal/remit.git && cd remit
+cp .env.example .env              # then replace every change-me value (openssl rand -base64 48 for the JWT secret)
+scripts/deploy.sh compose         # builds missing images, starts everything, waits until all services are healthy
+scripts/seed-sftp.sh              # drops the five sample files into SFTP /inbound
+scripts/smoke-test.sh --keep      # asserts every sample outcome through the API (see the note below)
 ```
 
-From empty volumes with images already pulled, the stack reached all-healthy in 19 s (measured on Windows 11 with Docker Desktop).
+`smoke-test.sh` needs an empty stack, because the samples are accepted only once (duplicate file detection). Run it instead of `seed-sftp.sh` on a fresh deployment, or with `--reset` to start from empty volumes; without `--keep` it removes the stack when it is done.
 
-### Local infrastructure
+Then:
+
+- Swagger UI: <http://localhost:8080/swagger-ui.html> (log in with `POST /api/v1/auth/login` as `operator` or `admin` and the passwords from `.env`, then use **Authorize** with the token)
+- Kafka UI: `docker compose --profile tools up -d kafka-ui`, then <http://localhost:8090>
+- Logs: `scripts/logs.sh intake-service` (JSON, pretty-printed with jq)
+- Stop: `docker compose down` (keeps data) or `docker compose down -v` (deletes all volumes)
+
+With image layers already built, `docker compose down -v` followed by `docker compose up -d --build` reached all-healthy in @@UP_WARM@@ (Windows 11, Docker Desktop). The first build of the three images downloads the Maven dependencies and takes about 2 minutes per image.
+
+### Services and ports
 
 | Service | Host address | What it provides |
 |---|---|---|
+| `api-service` | `localhost:8080` | Operator REST API, Swagger UI, actuator health |
+| `intake-service` | `localhost:8081` | Actuator health and `/actuator/ingestjobs` (job executions and restarts, see the runbook) |
+| `routing-service` | `localhost:8082` | Actuator health |
 | `mysql` (8.4) | `localhost:3307` | Schemas `remit_intake`, `remit_routing`, `remit_api`; users of the same names, each granted only on its own schema |
 | `mongo` (7.0) | `localhost:27018` | Database `remit_audit` with collection `audit_events` and its indexes; the app user can insert and read but not update or delete |
 | `kafka` (3.9, KRaft) | `localhost:29092` (host), `kafka:9092` (compose network) | Single broker, topic auto-creation disabled |
@@ -106,9 +119,38 @@ From empty volumes with images already pulled, the stack reached all-healthy in 
 
 Notes:
 
+- The three services run the `docker` profile and wait for healthy MySQL, MongoDB and SFTP and for `kafka-init` to finish. They get only the variables they need from `.env`; the `REMIT_*_HOST` values in `.env` are for services run outside compose.
+- Compose pins the business date to 2026-10-15 (`REMIT_CLOCK_FIXED_DATE`, [ADR 0005](docs/decisions/0005-demo-clock.md)) so the committed samples always validate, polls SFTP every 10 s (`REMIT_SFTP_POLL_INTERVAL`), and turns on the `FORCE_FAIL` chaos hook.
+- MySQL runs with `innodb_flush_log_at_trx_commit=2` and `sync_binlog=0`: a crash can lose the last second of commits, a fair trade for a local stack where per-commit fsyncs made routing about four times slower (see [Measured performance](#measured-performance)).
 - MySQL and MongoDB publish on 3307 and 27018 so they do not clash with native installs; change `REMIT_MYSQL_PORT` / `REMIT_MONGO_PORT` in `.env` if needed.
 - The init scripts in `docker/` run only when a data volume is empty. After changing a password in `.env`, recreate with `docker compose down -v`.
 - The SFTP host key is regenerated whenever the container is recreated, so local clients should not pin it.
+
+### Container images
+
+Each service has a two-stage `Dockerfile` built from the repository root (it needs the parent pom and `remit-common`):
+
+1. `maven:3-eclipse-temurin-17` copies the poms first and resolves dependencies in their own layer, so a code change does not download anything again, then packages the service with `-DskipTests` (tests run in `./mvnw verify` and CI, not in the image build).
+2. `eclipse-temurin:17-jre` receives the Spring Boot layers (`java -Djarmode=tools -jar app.jar extract --layers`, the Boot 3.3+ successor of `layertools`) as four `COPY` layers: dependencies, loader, snapshot dependencies, application. It runs as uid 10001 with `-XX:MaxRAMPercentage=75`, and `HEALTHCHECK` curls `/actuator/health`. Extra JVM flags go in `JAVA_TOOL_OPTIONS`.
+
+Images are named `remit/<service>:<tag>`; compose uses `REMIT_IMAGE_TAG` (default `latest`) and `scripts/build.sh` tags both the git short SHA and `latest`.
+
+### Scripts
+
+All scripts take `-h` for help, use `set -euo pipefail`, read `.env`, and pass `shellcheck scripts/*.sh`.
+
+| Script | What it does |
+|---|---|
+| `scripts/build.sh [--skip-tests]` | `./mvnw -B verify`, then builds the three images tagged with the git short SHA and `latest` |
+| `scripts/deploy.sh compose\|k8s` | `docker compose up -d` (`--build` to rebuild) and waits up to 180 s for every service to be healthy, printing each status; `k8s` runs `scripts/k8s-up.sh` (Kubernetes milestone) |
+| `scripts/restart.sh <service> [compose\|k8s]` | Restarts one service and waits until it is healthy again (`kubectl rollout restart` and `rollout status` for k8s) |
+| `scripts/seed-sftp.sh [file...]` | Uploads files (default: `samples/*.csv`) to `/inbound`. Default transport streams them into the compose `sftp` container (needs only the docker CLI); `--via sftp` uses `sftp` and `sshpass` like a real client |
+| `scripts/logs.sh <service>` | Follows a service's JSON logs, pretty-printed with jq (`-c` compact, `--no-follow`, `-n LINES`) |
+| `scripts/gen-batch.sh <clientId> <rows>` | Generates a valid batch file; `-r FORCE_FAIL` makes every row fail in routing |
+| `scripts/smoke-test.sh` | End-to-end test of the samples and a dead-letter replay |
+| `scripts/perf-test.sh` | NFR-05 measurement with a 10,000-row file ([Measured performance](#measured-performance)) |
+
+Every file lands in `/inbound` under a hidden `.part` name and is renamed once complete, so the poller never reads a partial upload.
 
 ## intake-service
 
