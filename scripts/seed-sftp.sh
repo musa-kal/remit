@@ -103,11 +103,12 @@ seed_via_sftp() {
   for i in "${!names[@]}"; do
     printf 'rename "/inbound/.%s.part" "/inbound/%s"\n' "${names[i]}" "${names[i]}" >>"${batch}"
   done
-  # BatchMode=no lets sshpass answer the password prompt that -b would otherwise disable. The
-  # container's host key changes whenever it is recreated, so it is not pinned.
-  SSHPASS="${REMIT_SFTP_PASSWORD}" sshpass -e sftp -q -b "${batch}" \
+  # -b turns on BatchMode, which disables password prompts. ssh keeps the first value it gets, so
+  # -o BatchMode=no must come before -b for sshpass to be able to answer the prompt.
+  # The container's host key changes whenever it is recreated, so it is not pinned.
+  SSHPASS="${REMIT_SFTP_PASSWORD}" sshpass -e sftp -q \
     -o BatchMode=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-    -P "${REMIT_SFTP_PORT:-2222}" "${sftp_user}@${REMIT_SFTP_HOST:-localhost}" >/dev/null
+    -b "${batch}" -P "${REMIT_SFTP_PORT:-2222}" "${sftp_user}@${REMIT_SFTP_HOST:-localhost}" >/dev/null
 }
 
 "seed_via_${via}"
