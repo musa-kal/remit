@@ -24,6 +24,6 @@ api-service's listener concurrency went from 1 to 3 as well, but in `application
 
 ## Consequences
 
-- If the MySQL container crashes (not a clean stop), up to about a second of acknowledged commits can be lost. For routing-service that is covered by redelivery: a lost `ROUTED` update leaves the row `ROUTING`, which the algorithm finishes on the next delivery. For a demo stack this is acceptable; a real deployment keeps the durable defaults.
+- If the MySQL container or the Docker VM crashes (a clean stop flushes everything), up to about a second of acknowledged commits can be lost, while the matching Kafka offsets stay committed. A ledger row could then be missing or stay `ROUTING` although its instruction was routed, and a read model row could miss its last update. For a demo stack this is acceptable; a real deployment keeps the durable defaults, which is why the setting lives in compose only.
 - The measured NFR-05 median is 32.5 s (README, "Measured performance"), with the tuning steps and their numbers recorded there.
 - The poll interval, the business date and the MySQL flags are visible in `docker-compose.yml` and can be changed through `.env`, so nothing about them is hidden from a reviewer.
