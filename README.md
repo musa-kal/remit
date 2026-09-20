@@ -370,7 +370,7 @@ Machine: Windows 11, Docker Desktop (WSL 2), 20 CPUs, 16 GB RAM (8 GB for the Do
 | Right after `docker compose up` (cold JVMs) | 48.7 s | 35.6 s | 24.5 s |
 | Directly after the first series | 30.5 s | 34.5 s | 28.6 s |
 
-**Median of the six runs: 32.5 s.** Where the time goes: about 1.3 s to upload, 3 to 12 s until the next poll picks the file up, 3.2 s for the intake job to validate and publish the 10,000 rows, and 20 to 37 s until routing-service has routed them and the API reports it (slowest for the first file after startup, while the JVMs warm up).
+**Median of the six runs: 32.5 s.** Where the time goes: about 1.3 s to upload, 3 to 12 s until the next poll picks the file up, then 20 to 37 s until the API reports all 10,000 routed (slowest for the first file after startup, while the JVMs warm up). Of that last part the intake job needs about 3.2 s to validate and publish the rows; the rest is routing-service and api-service working through them.
 
 Tuning, starting from the first measurement (one run each unless noted):
 
