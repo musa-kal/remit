@@ -7,7 +7,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/gen-batch.sh [-h] [-o DIR] <clientId> <rows>
+Usage: scripts/gen-batch.sh [-h] [-o DIR] [-r TEXT] <clientId> <rows>
 
 Writes DIR/PAY_<clientId>_<yyyyMMddHHmmss>.csv (DIR defaults to the current directory) and
 prints its path.
@@ -18,10 +18,15 @@ Arguments:
 
 Options:
   -o DIR     output directory (created if missing)
+  -r TEXT    remittance_info of every row (default "Load test <n>"). -r FORCE_FAIL makes
+             every row fail in routing-service when its chaos hook is on (docker profile)
   -h         show this help
 
 Environment:
-  VALUE_DATE  value date for every row (yyyy-MM-dd). Default: tomorrow in America/Toronto.
+  VALUE_DATE              value date for every row (yyyy-MM-dd). Default: REMIT_CLOCK_FIXED_DATE
+                          when set, otherwise tomorrow in America/Toronto.
+  REMIT_CLOCK_FIXED_DATE  the business date pinned in intake-service (ADR 0005); compose pins
+                          2026-10-15, where tomorrow's real date may be in the past.
 
 Example:
   scripts/gen-batch.sh -o /tmp ACME01 10000
@@ -40,13 +45,15 @@ tomorrow_in_toronto() {
 }
 
 out_dir="."
-while getopts ":ho:" opt; do
+remittance=""
+while getopts ":ho:r:" opt; do
   case "${opt}" in
     h)
       usage
       exit 0
       ;;
     o) out_dir="${OPTARG}" ;;
+    r) remittance="${OPTARG}" ;;
     :) die "option -${OPTARG} needs a value" ;;
     *) die "unknown option -${OPTARG} (see -h)" ;;
   esac
@@ -63,14 +70,17 @@ rows="$2"
 [[ "${client_id}" =~ ^[A-Z0-9]{3,10}$ ]] || die "clientId must be 3 to 10 upper-case letters or digits"
 [[ "${rows}" =~ ^[1-9][0-9]*$ ]] || die "rows must be a positive integer"
 
-value_date="${VALUE_DATE:-$(tomorrow_in_toronto)}"
+value_date="${VALUE_DATE:-${REMIT_CLOCK_FIXED_DATE:-$(tomorrow_in_toronto)}}"
 [[ "${value_date}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "VALUE_DATE must be yyyy-MM-dd"
+# Kept to characters that need no CSV quoting and no awk escaping.
+[[ -z "${remittance}" || "${remittance}" =~ ^[A-Za-z0-9\ ._-]{1,140}$ ]] ||
+  die "-r takes 1 to 140 letters, digits, spaces, dots, underscores or hyphens"
 
 stamp="$(TZ=America/Toronto date +%Y%m%d%H%M%S)"
 mkdir -p "${out_dir}"
 file="${out_dir}/PAY_${client_id}_${stamp}.csv"
 
-awk -v rows="${rows}" -v value_date="${value_date}" -v run="G${stamp}" '
+awk -v rows="${rows}" -v value_date="${value_date}" -v run="G${stamp}" -v remittance="${remittance}" '
 BEGIN {
   print "instruction_ref,debtor_name,debtor_institution,debtor_transit,debtor_account," \
         "creditor_name,creditor_institution,creditor_transit,creditor_account,amount," \
@@ -89,9 +99,10 @@ BEGIN {
       channel = "WIRE"; currency = (i % 2 ? "USD" : "CAD"); cents = 100000 + (i * 1299709) % 50000000
     }
     total += cents
-    printf "%s-%d,Generated Debtor %d,001,00011,%d,Generated Creditor %d,002,00022,%d,%d.%02d,%s,%s,%s,Load test %d\n", \
+    info = (remittance == "" ? "Load test " i : remittance)
+    printf "%s-%d,Generated Debtor %d,001,00011,%d,Generated Creditor %d,002,00022,%d,%d.%02d,%s,%s,%s,%s\n", \
       run, i, i % 50, 1000000 + i % 8999999, i % 75, 2000000 + (i * 31) % 7999999, \
-      int(cents / 100), cents % 100, currency, channel, value_date, i
+      int(cents / 100), cents % 100, currency, channel, value_date, info
   }
   # %.0f keeps large totals exact in awks whose %d is 32 bit (mawk).
   printf "TRAILER,%d,%.0f.%02d\n", rows, int(total / 100), total % 100
