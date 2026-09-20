@@ -125,6 +125,7 @@ Notes:
 - MySQL and MongoDB publish on 3307 and 27018 so they do not clash with native installs; change `REMIT_MYSQL_PORT` / `REMIT_MONGO_PORT` in `.env` if needed.
 - The init scripts in `docker/` run only when a data volume is empty. After changing a password in `.env`, recreate with `docker compose down -v`.
 - The SFTP host key is regenerated whenever the container is recreated, so local clients should not pin it.
+- To run a service from an IDE or with `java -jar` (the "Run it locally" sections below), stop its container first, for example `docker compose stop api-service`; otherwise both hold the same port and share the Kafka consumer group.
 
 ### Container images
 
