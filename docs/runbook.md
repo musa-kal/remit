@@ -2,6 +2,33 @@
 
 Operational procedures. Commands assume the repository root and the ports used by Docker Compose; for Kubernetes, first run `kubectl -n remit port-forward deploy/intake-service 8081:8081`.
 
+## Restart a service
+
+Restart a service after changing its configuration, to recover it when its health stays `DOWN` after the cause is fixed (for example MySQL was restarted underneath it), or to pick up a rotated secret.
+
+```bash
+scripts/restart.sh routing-service            # compose: docker compose restart, then waits for the healthcheck
+scripts/restart.sh api-service k8s            # kubectl -n remit rollout restart + rollout status
+```
+
+The script exits non-zero if the service is not healthy within 180 s (`--timeout` to change). What a restart does to work in flight:
+
+| Service | Effect of a restart |
+|---|---|
+| intake-service | A job that was running is interrupted and its file stays in `/processing`; restart it as in [Restart a failed batch job](#restart-a-failed-batch-job-fr-int-06), after [marking it failed](#a-job-stuck-in-started) if it is left `STARTED`. Restart intake-service between polls (`/actuator/ingestjobs` shows nothing `STARTED`) to avoid this. Files still in `/inbound` are picked up by the next poll. |
+| routing-service | Uncommitted offsets are redelivered to the next consumer. An instruction caught between its `ROUTING` insert and its commit is finished on redelivery; one already routed is answered with a `DUPLICATE` status event ([ADR 0002](decisions/0002-idempotency.md)). |
+| api-service | Tokens stay valid (they are stateless), but the in-memory login lockout is cleared. Unconsumed events are read after the restart; the read model and the audit trail ignore redeliveries. |
+
+`docker compose restart` keeps the container and its environment. After changing `.env`, recreate the container instead so it sees the new values: `docker compose up -d <service>`, then `scripts/deploy.sh compose` to wait for health.
+
+Check the result:
+
+```bash
+docker compose ps                              # STATUS shows (healthy)
+curl -s localhost:8082/actuator/health | jq    # components db and kafka UP (8080 api, 8081 intake)
+scripts/logs.sh -n 20 --no-follow routing-service
+```
+
 ## Restart a failed batch job (FR-INT-06)
 
 A batch job fails "technically" when something outside the file breaks while it runs: Kafka does not acknowledge a publish, MySQL is unreachable, the pod is stopped. Files that are simply invalid do not fail the job; they end in the SFTP `/error` directory with a `<file>.error.txt` note and need a corrected file from the client, not a restart (see [ADR 0007](decisions/0007-intake-failure-handling.md)).
