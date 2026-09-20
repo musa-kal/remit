@@ -359,6 +359,30 @@ curl -s localhost:8080/api/v1/stats/summary -H "Authorization: Bearer $TOKEN"
 
 Run intake-service and routing-service next to it and drop the samples; [docs/e2e-expectations.md](docs/e2e-expectations.md) lists what the API should then report. The build (`./mvnw -B verify`) regenerates [docs/openapi.json](docs/openapi.json) from the running application.
 
+## Measured performance
+
+NFR-05 asks that a 10,000-row valid file goes from the SFTP drop to all instructions `ROUTED` in under 60 s on a local compose stack. Measured with `scripts/perf-test.sh --runs 3`: it generates a 10,000-row file with `gen-batch.sh`, takes the start time right before uploading it to `/inbound`, and stops when `GET /api/v1/batches/{id}` reports `ROUTED + REQUIRES_REVIEW = 10000` (polled every 0.5 s). The figure therefore includes the wait for the next SFTP poll, the intake job, routing, and api-service catching up with the status events.
+
+Machine: Windows 11, Docker Desktop (WSL 2), 20 CPUs, 16 GB RAM (8 GB for the Docker VM); every container of the stack on the same machine.
+
+| Series (final configuration) | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| Right after `docker compose up` (cold JVMs) | 48.7 s | 35.6 s | 24.5 s |
+| Directly after the first series | 30.5 s | 34.5 s | 28.6 s |
+
+**Median of the six runs: 32.5 s.** Where the time goes: about 1.3 s to upload, 3 to 12 s until the next poll picks the file up, 3.2 s for the intake job to validate and publish the 10,000 rows, and 20 to 37 s until routing-service has routed them and the API reports it (slowest for the first file after startup, while the JVMs warm up).
+
+Tuning, starting from the first measurement (one run each unless noted):
+
+| Change | Upload to all routed | Observation |
+|---|---|---|
+| Baseline: service defaults, SFTP poll every 30 s | 173.9 s | 17.3 s poll wait, then 156.6 s to route: about 100 instructions/s, limited by two fsynced MySQL commits per instruction on Docker Desktop |
+| MySQL `innodb_flush_log_at_trx_commit=2`, `sync_binlog=0` (compose only) | 75.9 s | 31.1 s poll wait, 44.7 s to route; routing-service itself took 25.8 s and the API read model finished about 19 s later |
+| api-service listener concurrency 1 to 3 | 38.0 s, 65.8 s | poll waits of 8.5 s and 32.1 s; the read model now keeps pace with routing (about 30 s for both) |
+| SFTP poll interval 30 s to 10 s (compose only) | median 32.5 s (six runs above) | the poll wait no longer decides whether a run meets the target |
+
+Also tried without a measurable gain: turning off the MySQL binary log. Deliberately unchanged: routing-service still awaits every publish and commits twice per instruction ([ADR 0002](docs/decisions/0002-idempotency.md)), topics keep 3 partitions (so 3 routing threads), and the intake chunk size stays 100.
+
 ## Status
 
 - [x] M0 Scaffold: parent POM, four modules, Spotless and JaCoCo configured
@@ -366,7 +390,7 @@ Run intake-service and routing-service next to it and drop the samples; [docs/e2
 - [x] M2 Common + intake: event records, masking and idempotency utilities, Spring Batch intake
 - [x] M3 Routing: idempotent consumer, retries, dead-letter topic
 - [x] M4 API + security + audit: REST endpoints, JWT and roles, MongoDB audit trail, DLT replay
-- [ ] M5 Containers + E2E: Dockerfiles, full compose stack, smoke test, measured throughput
+- [x] M5 Containers + E2E: Dockerfiles, full compose stack, smoke test, measured throughput
 - [ ] M6 Postman: collection and environments, Newman run
 - [ ] M7 CI: Jenkins and SonarQube, quality gate
 - [ ] M8 Kubernetes + scripts: kustomize base and local overlay, ops scripts
