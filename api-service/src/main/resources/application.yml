@@ -47,6 +47,10 @@ spring:
     listener:
       # Commit each record's offset once the listener returns from it.
       ack-mode: record
+      # One consumer thread per partition (3 locally) for every listener. Records of one key share
+      # a partition, so they are still handled in order; rows are claimed with insert-if-absent
+      # plus a row lock, so threads working on different keys never overwrite each other.
+      concurrency: 3
     producer:
       # Replays are published like intake publishes instructions: acks=all, idempotent.
       acks: all
