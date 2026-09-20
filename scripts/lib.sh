@@ -25,10 +25,6 @@ export REMIT_ROOT
 # shellcheck disable=SC2034 # used by the scripts that source this file
 REMIT_APP_SERVICES=(intake-service routing-service api-service)
 
-# Git Bash on Windows rewrites arguments that look like POSIX paths (/home/remit/inbound) before
-# docker.exe sees them. The scripts only pass container paths to docker, so turn that off.
-export MSYS_NO_PATHCONV=1
-
 if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
   _c_reset=$'\033[0m' _c_red=$'\033[31m' _c_green=$'\033[32m' _c_yellow=$'\033[33m' _c_blue=$'\033[34m'
 else
@@ -71,11 +67,14 @@ load_env() {
   done <"${file}"
 }
 
-# compose <args>: docker compose for this repository, whatever the current directory is. It runs
-# from the repository root instead of passing -f <path>, because with MSYS_NO_PATHCONV set a Git
-# Bash path such as /c/Users/... would reach docker.exe unconverted.
+# compose <args>: docker compose for this repository, whatever the current directory is.
+# Git Bash on Windows rewrites arguments that look like POSIX paths (/home/remit/inbound) before a
+# Windows program such as docker.exe sees them; the arguments given here are container paths, so
+# MSYS_NO_PATHCONV turns that off for this call only (other tools, like curl -o /tmp/..., still
+# need the conversion). It is a no-op elsewhere. For the same reason compose runs from the
+# repository root instead of taking -f <host path>.
 compose() {
-  (cd "${REMIT_ROOT}" && docker compose "$@")
+  (cd "${REMIT_ROOT}" && MSYS_NO_PATHCONV=1 docker compose "$@")
 }
 
 # service_state <service>: prints "<state> <health>" of the compose service's container
