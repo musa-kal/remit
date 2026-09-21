@@ -237,6 +237,10 @@ summary="$(get /api/v1/stats/summary "${OPERATOR_TOKEN}")"
 existing="$(jq '[.batches[]] | add' <<<"${summary}")"
 [[ "${existing}" == 0 ]] ||
   die "the stack already holds ${existing} batches; the samples need an empty stack (rerun with --reset)"
+# Files seeded a moment ago are not batches yet; they would turn the samples into duplicates.
+if compose_sftp_available && [[ -n "$(sftp_listing "/home/${REMIT_SFTP_USER:-remit}/inbound")" ]]; then
+  die "SFTP /inbound already holds files waiting for the poller; rerun with --reset"
+fi
 
 # ---------------------------------------------------------------------------------------------
 # 2 and 3. Seed the samples and wait until they have settled
