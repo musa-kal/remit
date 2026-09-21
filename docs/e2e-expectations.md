@@ -1,10 +1,10 @@
 # End-to-end expectations for the sample files
 
-`scripts/smoke-test.sh` (M5) uploads every file in `samples/` and compares what the API reports with this table. The intake columns are verified by `SampleFilesJobIT`. The routing columns follow from the routing rules that `RoutingRulesTest` and the routing-service integration tests cover; `smoke-test.sh` checks them end to end.
+`scripts/smoke-test.sh` (M5) uploads every file in `samples/` and compares what the API reports with this table: the stats summary, every batch and its detail, the rejected rows, the duplicate `ACME-0003`, account masking, the batch audit documents, the SFTP destinations, and steps 1 to 3 of the dead-letter cycle at the end (70 checks). The intake columns are verified by `SampleFilesJobIT`. The routing columns follow from the routing rules that `RoutingRulesTest` and the routing-service integration tests cover; `smoke-test.sh` checks them end to end.
 
 Assumptions:
 
-- The business date is between 2026-09-15 and 2026-10-15, or `REMIT_CLOCK_FIXED_DATE=2026-10-15` is set (see [ADR 0005](decisions/0005-demo-clock.md)).
+- The business date is between 2026-09-15 and 2026-10-15, or `REMIT_CLOCK_FIXED_DATE=2026-10-15` is set (see [ADR 0005](decisions/0005-demo-clock.md)). Docker Compose sets it by default ([ADR 0011](decisions/0011-local-stack-settings.md)).
 - The files are uploaded together on an empty stack. The poller processes them in file name order, so `...093000` is registered before its duplicate `...110000`.
 - Channel limits are the illustrative defaults in `intake-service/src/main/resources/application.yml`.
 
