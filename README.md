@@ -88,11 +88,10 @@ Prerequisites: Docker with Compose v2, Bash (Git Bash works on Windows), `curl` 
 git clone https://github.com/Musa-Kal/remit.git && cd remit
 cp .env.example .env              # then replace every change-me value (openssl rand -base64 48 for the JWT secret)
 scripts/deploy.sh compose         # builds missing images, starts everything, waits until all services are healthy
-scripts/seed-sftp.sh              # drops the five sample files into SFTP /inbound
-scripts/smoke-test.sh --keep      # asserts every sample outcome through the API (see the note below)
+scripts/smoke-test.sh --keep      # uploads the five samples, asserts every outcome through the API, leaves the stack up
 ```
 
-`smoke-test.sh` needs an empty stack, because the samples are accepted only once (duplicate file detection). Run it instead of `seed-sftp.sh` on a fresh deployment, or with `--reset` to start from empty volumes; without `--keep` it removes the stack when it is done.
+To drop the samples without the checks, run `scripts/seed-sftp.sh` instead of the smoke test. Use one or the other on a fresh stack: the samples are accepted only once (duplicate file detection), so `smoke-test.sh` refuses a stack that already holds batches unless it is given `--reset`, which starts from empty volumes. Without `--keep` it removes the stack when it is done.
 
 Then:
 
