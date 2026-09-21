@@ -178,13 +178,13 @@ shorten() {
 
 print_results() {
   local row verdict name expected actual color
-  printf '\n%-6s  %-44s  %-44s  %s\n' RESULT CHECK EXPECTED ACTUAL
-  printf '%-6s  %-44s  %-44s  %s\n' ------ ----- -------- ------
+  printf '\n%-6s  %-52s  %-44s  %s\n' RESULT CHECK EXPECTED ACTUAL
+  printf '%-6s  %-52s  %-44s  %s\n' ------ ----- -------- ------
   for row in "${RESULTS[@]}"; do
     IFS=$'\t' read -r verdict name expected actual <<<"${row}"
     color="${_c_green}"
     [[ "${verdict}" == PASS ]] || color="${_c_red}"
-    printf '%s%-6s%s  %-44s  %-44s  %s\n' "${color}" "${verdict}" "${_c_reset}" "${name}" \
+    printf '%s%-6s%s  %-52s  %-44s  %s\n' "${color}" "${verdict}" "${_c_reset}" "${name}" \
       "$(shorten "${expected}")" "$(shorten "${actual}")"
   done
   printf '\n%d checks, %d passed, %d failed\n' "${#RESULTS[@]}" "$((${#RESULTS[@]} - FAILURES))" "${FAILURES}"
