@@ -115,4 +115,4 @@ seed_via_sftp() {
 for name in "${names[@]}"; do
   log_info "uploaded /inbound/${name}"
 done
-log_ok "${#names[@]} file(s) in /inbound via ${via}; intake-service picks them up on its next poll (REMIT_SFTP_POLL_INTERVAL, default 30s)"
+log_ok "${#names[@]} file(s) in /inbound via ${via}; intake-service picks them up on its next poll (every REMIT_SFTP_POLL_INTERVAL)"
