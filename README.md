@@ -101,7 +101,7 @@ Then:
 - Logs: `scripts/logs.sh intake-service` (JSON, pretty-printed with jq)
 - Stop: `docker compose down` (keeps data) or `docker compose down -v` (deletes all volumes)
 
-With image layers already built, `docker compose down -v` followed by `docker compose up -d --build` reached all-healthy in @@UP_WARM@@ (Windows 11, Docker Desktop). The first build of the three images downloads the Maven dependencies and takes about 2 minutes per image.
+With image layers already built, `docker compose down -v` followed by `docker compose up -d --build` reached all-healthy in 52 s (Windows 11, Docker Desktop, 20 CPUs; the builds were cache hits). The first build of the three images downloads the Maven dependencies and takes about 2 minutes per image.
 
 ### Services and ports
 
