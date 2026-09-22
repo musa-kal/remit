@@ -5,7 +5,479 @@
     "description": "API tests for the Remit operator API (api-service, `/api/v1`).\n\nRun it against the state that `scripts/smoke-test.sh --reset --keep` leaves behind: the five sample files settled\nplus the CHAOS01 batch whose only instruction is dead-lettered (see `docs/e2e-expectations.md`). The run can be\nrepeated against the same stack: the dead-letter replay requests adapt to the replay count they find.\n\nSet `operatorPassword` and `adminPassword` in the environment (or pass `--env-var` to Newman). The collection\npre-request script logs in as both users with `pm.sendRequest` whenever a token is missing or older than\n10 minutes (tokens live 15) and keeps them in the collection variables `operatorToken` and `adminToken`.\nRequests use the operator token unless they override the auth with `{{adminToken}}`, no auth, or a forged token.\n\nFive failed logins lock a username for 10 minutes, so the script never retries a refused login: after a 401\nor 429 it stops logging in for 10 minutes (collection variable `loginBlockedUntil`, clear it after fixing\nthe password). Negative login tests use a username that does not exist.\n\nRequests chain through collection variables (`acme093000BatchId`, `acme0003Key`, `deadLetterId`, ...), so run\nthe folders in order.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "item": [],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Logs in as the two seeded users (their passwords come from the environment) and checks login validation. The login with an unknown user is in Security Negative Cases.",
+      "item": [
+        {
+          "name": "Login as operator",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Never guess a password: five failed logins lock the username for 10 minutes.",
+                  "const blockedUntil = Number(pm.collectionVariables.get('loginBlockedUntil')) || 0;",
+                  "if (!pm.variables.get('operatorPassword') || Date.now() < blockedUntil) {",
+                  "  console.warn('operatorPassword is empty or a login was refused recently; skipping ' + pm.info.requestName);",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('body matches the login response schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"accessToken\",",
+                  "      \"tokenType\",",
+                  "      \"expiresIn\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"accessToken\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^[A-Za-z0-9_-]+\\\\.[A-Za-z0-9_-]+\\\\.[A-Za-z0-9_-]+$\"",
+                  "      },",
+                  "      \"tokenType\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"expiresIn\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 1",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test('token type is Bearer and the token lives 900 seconds', function () {",
+                  "  pm.expect(body.tokenType).to.eql('Bearer');",
+                  "  pm.expect(body.expiresIn).to.eql(900);",
+                  "});",
+                  "// Decodes a base64url JWT segment with the CryptoJS bundled in the Postman sandbox.",
+                  "function decodeSegment(segment) {",
+                  "  const base64 = segment.replace(/-/g, '+').replace(/_/g, '/');",
+                  "  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);",
+                  "  return JSON.parse(CryptoJS.enc.Base64.parse(padded).toString(CryptoJS.enc.Utf8));",
+                  "}",
+                  "const parts = body.accessToken.split('.');",
+                  "const header = decodeSegment(parts[0]);",
+                  "const claims = decodeSegment(parts[1]);",
+                  "pm.test('token is signed with HS256', function () {",
+                  "  pm.expect(header.alg).to.eql('HS256');",
+                  "});",
+                  "pm.test('subject is the operator user', function () {",
+                  "  pm.expect(claims.sub).to.eql(pm.variables.get('operatorUsername'));",
+                  "});",
+                  "pm.test('roles claim is OPERATOR', function () {",
+                  "  pm.expect(claims.roles).to.have.members(['OPERATOR']);",
+                  "  pm.expect(claims.roles).to.have.lengthOf(1);",
+                  "});",
+                  "pm.test('claims carry iat, exp 15 minutes later and a jti', function () {",
+                  "  pm.expect(claims.exp - claims.iat).to.eql(900);",
+                  "  pm.expect(claims.jti).to.be.a('string').and.not.be.empty;",
+                  "});",
+                  "pm.collectionVariables.set('operatorToken', body.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{operatorUsername}}\",\n  \"password\": \"{{operatorPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Logs in as the seeded OPERATOR user and checks the token and its claims."
+          },
+          "response": []
+        },
+        {
+          "name": "Login as admin",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Never guess a password: five failed logins lock the username for 10 minutes.",
+                  "const blockedUntil = Number(pm.collectionVariables.get('loginBlockedUntil')) || 0;",
+                  "if (!pm.variables.get('adminPassword') || Date.now() < blockedUntil) {",
+                  "  console.warn('adminPassword is empty or a login was refused recently; skipping ' + pm.info.requestName);",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('body matches the login response schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"accessToken\",",
+                  "      \"tokenType\",",
+                  "      \"expiresIn\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"accessToken\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^[A-Za-z0-9_-]+\\\\.[A-Za-z0-9_-]+\\\\.[A-Za-z0-9_-]+$\"",
+                  "      },",
+                  "      \"tokenType\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"expiresIn\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 1",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test('token type is Bearer and the token lives 900 seconds', function () {",
+                  "  pm.expect(body.tokenType).to.eql('Bearer');",
+                  "  pm.expect(body.expiresIn).to.eql(900);",
+                  "});",
+                  "// Decodes a base64url JWT segment with the CryptoJS bundled in the Postman sandbox.",
+                  "function decodeSegment(segment) {",
+                  "  const base64 = segment.replace(/-/g, '+').replace(/_/g, '/');",
+                  "  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);",
+                  "  return JSON.parse(CryptoJS.enc.Base64.parse(padded).toString(CryptoJS.enc.Utf8));",
+                  "}",
+                  "const parts = body.accessToken.split('.');",
+                  "const header = decodeSegment(parts[0]);",
+                  "const claims = decodeSegment(parts[1]);",
+                  "pm.test('token is signed with HS256', function () {",
+                  "  pm.expect(header.alg).to.eql('HS256');",
+                  "});",
+                  "pm.test('subject is the admin user', function () {",
+                  "  pm.expect(claims.sub).to.eql(pm.variables.get('adminUsername'));",
+                  "});",
+                  "pm.test('roles claim is ADMIN and OPERATOR', function () {",
+                  "  pm.expect(claims.roles).to.have.members(['ADMIN', 'OPERATOR']);",
+                  "  pm.expect(claims.roles).to.have.lengthOf(2);",
+                  "});",
+                  "pm.test('claims carry iat, exp 15 minutes later and a jti', function () {",
+                  "  pm.expect(claims.exp - claims.iat).to.eql(900);",
+                  "  pm.expect(claims.jti).to.be.a('string').and.not.be.empty;",
+                  "});",
+                  "pm.collectionVariables.set('adminToken', body.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{adminUsername}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Logs in as the seeded admin user, who holds both OPERATOR and ADMIN."
+          },
+          "response": []
+        },
+        {
+          "name": "Login with blank credentials returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 400 Bad Request', function () {",
+                  "  pm.expect(problem.status).to.eql(400);",
+                  "  pm.expect(problem.title).to.eql('Bad Request');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('The request has invalid fields');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/auth/login');",
+                  "});",
+                  "pm.test('field error on username: must not be blank', function () {",
+                  "  const error = (problem.errors || []).find(function (e) {",
+                  "    return e.field === 'username';",
+                  "  });",
+                  "  pm.expect(error, 'error for username').to.be.an('object');",
+                  "  pm.expect(error.message).to.include('must not be blank');",
+                  "});",
+                  "pm.test('field error on password: must not be blank', function () {",
+                  "  const error = (problem.errors || []).find(function (e) {",
+                  "    return e.field === 'password';",
+                  "  });",
+                  "  pm.expect(error, 'error for password').to.be.an('object');",
+                  "  pm.expect(error.message).to.include('must not be blank');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"\",\n  \"password\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Bean Validation rejects the body before any credential check, so it never counts as a failed login."
+          },
+          "response": []
+        },
+        {
+          "name": "Login with a body that is not JSON returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 400 Bad Request', function () {",
+                  "  pm.expect(problem.status).to.eql(400);",
+                  "  pm.expect(problem.title).to.eql('Bad Request');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('The request body is missing or not valid JSON');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/auth/login');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "username=operator",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
   "auth": {
     "type": "bearer",
     "bearer": [
