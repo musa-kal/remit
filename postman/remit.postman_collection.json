@@ -1,0 +1,137 @@
+{
+  "info": {
+    "_postman_id": "3b0c7f64-5d0e-4a8e-9f57-2f4f5d2c9a10",
+    "name": "Remit operator API",
+    "description": "API tests for the Remit operator API (api-service, `/api/v1`).\n\nRun it against the state that `scripts/smoke-test.sh --reset --keep` leaves behind: the five sample files settled\nplus the CHAOS01 batch whose only instruction is dead-lettered (see `docs/e2e-expectations.md`). The run can be\nrepeated against the same stack: the dead-letter replay requests adapt to the replay count they find.\n\nSet `operatorPassword` and `adminPassword` in the environment (or pass `--env-var` to Newman). The collection\npre-request script logs in as both users with `pm.sendRequest` whenever a token is missing or older than\n10 minutes (tokens live 15) and keeps them in the collection variables `operatorToken` and `adminToken`.\nRequests use the operator token unless they override the auth with `{{adminToken}}`, no auth, or a forged token.\n\nFive failed logins lock a username for 10 minutes, so the script never retries a refused login: after a 401\nor 429 it stops logging in for 10 minutes (collection variable `loginBlockedUntil`, clear it after fixing\nthe password). Negative login tests use a username that does not exist.\n\nRequests chain through collection variables (`acme093000BatchId`, `acme0003Key`, `deadLetterId`, ...), so run\nthe folders in order.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{operatorToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Logs in as operator and admin when a token is missing or older than 10 minutes (tokens live",
+          "// 15 minutes) and stores both tokens in collection variables. Requests send {{operatorToken}}",
+          "// through the collection auth; ADMIN-only requests override it with {{adminToken}}.",
+          "const maxAgeMs = 10 * 60 * 1000;",
+          "const now = Date.now();",
+          "const issuedAt = Number(pm.collectionVariables.get('tokenIssuedAt')) || 0;",
+          "const blockedUntil = Number(pm.collectionVariables.get('loginBlockedUntil')) || 0;",
+          "const haveTokens = Boolean(pm.collectionVariables.get('operatorToken') && pm.collectionVariables.get('adminToken'));",
+          "",
+          "if ((!haveTokens || now - issuedAt >= maxAgeMs) && now >= blockedUntil) {",
+          "  const users = [",
+          "    {",
+          "      tokenVariable: 'operatorToken',",
+          "      username: pm.variables.get('operatorUsername'),",
+          "      password: pm.variables.get('operatorPassword')",
+          "    },",
+          "    {",
+          "      tokenVariable: 'adminToken',",
+          "      username: pm.variables.get('adminUsername'),",
+          "      password: pm.variables.get('adminPassword')",
+          "    }",
+          "  ];",
+          "  const incomplete = users.filter(function (user) {",
+          "    return !user.username || !user.password;",
+          "  });",
+          "",
+          "  if (incomplete.length > 0) {",
+          "    console.error('Set operatorUsername, operatorPassword, adminUsername and adminPassword in the environment ' +",
+          "      '(newman: --env-var operatorPassword=... --env-var adminPassword=...). Not logging in.');",
+          "  } else {",
+          "    const login = function (index) {",
+          "      if (index === users.length) {",
+          "        pm.collectionVariables.set('tokenIssuedAt', String(now));",
+          "        return;",
+          "      }",
+          "      const user = users[index];",
+          "      pm.sendRequest({",
+          "        url: pm.variables.get('baseUrl') + '/auth/login',",
+          "        method: 'POST',",
+          "        header: { 'Content-Type': 'application/json' },",
+          "        body: { mode: 'raw', raw: JSON.stringify({ username: user.username, password: user.password }) }",
+          "      }, function (error, response) {",
+          "        if (error) {",
+          "          console.error('Login as ' + user.username + ' failed: ' + error);",
+          "          return;",
+          "        }",
+          "        if (response.code !== 200) {",
+          "          if (response.code === 401 || response.code === 429) {",
+          "            // Five failures lock the username for 10 minutes; do not add more.",
+          "            pm.collectionVariables.set('loginBlockedUntil', String(Date.now() + maxAgeMs));",
+          "          }",
+          "          console.error('Login as ' + user.username + ' answered ' + response.code + ': ' + response.text());",
+          "          return;",
+          "        }",
+          "        pm.collectionVariables.set(user.tokenVariable, response.json().accessToken);",
+          "        login(index + 1);",
+          "      });",
+          "    };",
+          "    login(0);",
+          "  }",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Checks that hold for every response of the API.",
+          "pm.test('[common] response carries an X-Correlation-Id header', function () {",
+          "  pm.response.to.have.header('X-Correlation-Id');",
+          "});",
+          "pm.test('[common] response time is below 5 s', function () {",
+          "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+          "});",
+          "if (pm.response.code >= 400) {",
+          "  pm.test('[common] error is application/problem+json without internals', function () {",
+          "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+          "    pm.expect(pm.response.text()).to.not.match(/Exception|\\tat [a-z]/);",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "operatorToken",
+      "value": "",
+      "type": "string",
+      "description": "Access token of the operator user (set by the collection pre-request script)"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string",
+      "description": "Access token of the admin user (set by the collection pre-request script)"
+    },
+    {
+      "key": "tokenIssuedAt",
+      "value": "",
+      "type": "string",
+      "description": "Epoch milliseconds of the last login by the collection pre-request script"
+    },
+    {
+      "key": "loginBlockedUntil",
+      "value": "",
+      "type": "string",
+      "description": "Epoch milliseconds until which the pre-request script will not log in after a refused login"
+    }
+  ]
+}
