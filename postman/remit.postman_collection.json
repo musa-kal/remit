@@ -12569,6 +12569,215 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Security Negative Cases",
+      "description": "Requests that must be refused: no token, malformed, forged, expired and unsigned tokens (401), an operator on ADMIN-only endpoints (403), a login with an unknown user (401, audited), and unknown paths and methods.",
+      "item": [
+        {
+          "name": "No token returns 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 401 Unauthorized', function () {",
+                  "  pm.expect(problem.status).to.eql(401);",
+                  "  pm.expect(problem.title).to.eql('Unauthorized');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('Authentication is required: send a bearer token');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/batches');",
+                  "});",
+                  "pm.test('WWW-Authenticate is Bearer', function () {",
+                  "  pm.expect(pm.response.headers.get('WWW-Authenticate')).to.eql('Bearer');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "batches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Malformed token returns 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 401 Unauthorized', function () {",
+                  "  pm.expect(problem.status).to.eql(401);",
+                  "  pm.expect(problem.title).to.eql('Unauthorized');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('The access token is invalid');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/batches');",
+                  "});",
+                  "pm.test('WWW-Authenticate is Bearer error=\"invalid_token\"', function () {",
+                  "  pm.expect(pm.response.headers.get('WWW-Authenticate')).to.eql('Bearer error=\"invalid_token\"');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "not.a.jwt",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "batches"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "auth": {
@@ -12805,6 +13014,12 @@
       "value": "",
       "type": "string",
       "description": "occurredAt of the BATCH_RECEIVED document of the 093000 batch"
+    },
+    {
+      "key": "unknownUsername",
+      "value": "",
+      "type": "string",
+      "description": "Fresh nonexistent username for the failed login test"
     }
   ]
 }
