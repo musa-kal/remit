@@ -1,0 +1,16 @@
+# Jenkins plugins installed into the CI image by jenkins-plugin-cli (latest versions compatible
+# with the Jenkins core of the base image; dependencies are resolved automatically).
+workflow-aggregator
+git
+docker-workflow
+junit
+jacoco
+sonar
+htmlpublisher
+nodejs
+configuration-as-code
+job-dsl
+pipeline-stage-view
+credentials-binding
+timestamper
+ws-cleanup
