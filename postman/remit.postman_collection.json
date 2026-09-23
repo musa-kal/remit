@@ -7421,6 +7421,501 @@
             "description": "Keys are client scoped: BETA02 reusing ACME-0001 is a new instruction (ADR 0006)."
           },
           "response": []
+        },
+        {
+          "name": "Unknown channel filter returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 400 Bad Request', function () {",
+                  "  pm.expect(problem.status).to.eql(400);",
+                  "  pm.expect(problem.title).to.eql('Bad Request');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('The request has invalid fields');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/batches/' + pm.collectionVariables.get('acme093000BatchId') + '/instructions');",
+                  "});",
+                  "pm.test('field error on channel: invalid value \\'SWIFT\\'', function () {",
+                  "  const error = (problem.errors || []).find(function (e) {",
+                  "    return e.field === 'channel';",
+                  "  });",
+                  "  pm.expect(error, 'error for channel').to.be.an('object');",
+                  "  pm.expect(error.message).to.include('invalid value \\'SWIFT\\'');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/batches/{{acme093000BatchId}}/instructions?channel=SWIFT",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "batches",
+                "{{acme093000BatchId}}",
+                "instructions"
+              ],
+              "query": [
+                {
+                  "key": "channel",
+                  "value": "SWIFT"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Unknown instruction sort property returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 400 Bad Request', function () {",
+                  "  pm.expect(problem.status).to.eql(400);",
+                  "  pm.expect(problem.title).to.eql('Bad Request');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('The request has invalid fields');",
+                  "});",
+                  "pm.test('field error on sort: cannot sort by \\'debtor\\'', function () {",
+                  "  const error = (problem.errors || []).find(function (e) {",
+                  "    return e.field === 'sort';",
+                  "  });",
+                  "  pm.expect(error, 'error for sort').to.be.an('object');",
+                  "  pm.expect(error.message).to.include('cannot sort by \\'debtor\\'');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/batches/{{acme093000BatchId}}/instructions?sort=debtor,asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "batches",
+                "{{acme093000BatchId}}",
+                "instructions"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "debtor,asc"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Unknown instruction returns 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 404', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 404 Not Found', function () {",
+                  "  pm.expect(problem.status).to.eql(404);",
+                  "  pm.expect(problem.title).to.eql('Not Found');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('Instruction 0000000000000000000000000000000000000000000000000000000000000000 not found');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/instructions/0000000000000000000000000000000000000000000000000000000000000000');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/instructions/0000000000000000000000000000000000000000000000000000000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "instructions",
+                "0000000000000000000000000000000000000000000000000000000000000000"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Malformed instruction key returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 400 Bad Request', function () {",
+                  "  pm.expect(problem.status).to.eql(400);",
+                  "  pm.expect(problem.title).to.eql('Bad Request');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('The request has invalid fields');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/instructions/ACME-0003');",
+                  "});",
+                  "pm.test('field error on idempotencyKey: must be 64 lower-case hex characters', function () {",
+                  "  const error = (problem.errors || []).find(function (e) {",
+                  "    return e.field === 'idempotencyKey';",
+                  "  });",
+                  "  pm.expect(error, 'error for idempotencyKey').to.be.an('object');",
+                  "  pm.expect(error.message).to.include('must be 64 lower-case hex characters');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/instructions/ACME-0003",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "instructions",
+                "ACME-0003"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Instructions of an unknown batch returns 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 404', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 404 Not Found', function () {",
+                  "  pm.expect(problem.status).to.eql(404);",
+                  "  pm.expect(problem.title).to.eql('Not Found');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('Batch 00000000-0000-4000-8000-000000000000 not found');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/batches/00000000-0000-4000-8000-000000000000/instructions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "batches",
+                "00000000-0000-4000-8000-000000000000",
+                "instructions"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     }
