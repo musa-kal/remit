@@ -8918,6 +8918,371 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Wait for the replay outcome",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const polls = Number(pm.collectionVariables.get('replayPolls')) || 0;",
+                  "if (polls > 0) {",
+                  "  // Gives routing-service time to retry (1 s, then 2 s) and dead-letter the replay again.",
+                  "  setTimeout(function () {}, 2000);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('body matches the page of dead letters schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"content\",",
+                  "      \"page\",",
+                  "      \"size\",",
+                  "      \"totalElements\",",
+                  "      \"totalPages\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"content\": {",
+                  "        \"type\": \"array\",",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"id\",",
+                  "            \"idempotencyKey\",",
+                  "            \"batchId\",",
+                  "            \"originalTopic\",",
+                  "            \"originalPartition\",",
+                  "            \"originalOffset\",",
+                  "            \"exceptionClass\",",
+                  "            \"exceptionMessage\",",
+                  "            \"status\",",
+                  "            \"replayCount\",",
+                  "            \"replayable\",",
+                  "            \"firstSeenAt\",",
+                  "            \"lastReplayedAt\",",
+                  "            \"updatedAt\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"id\": {",
+                  "              \"type\": \"integer\",",
+                  "              \"minimum\": 1",
+                  "            },",
+                  "            \"idempotencyKey\": {",
+                  "              \"type\": [",
+                  "                \"string\",",
+                  "                \"null\"",
+                  "              ],",
+                  "              \"pattern\": \"^[0-9a-f]{64}$\"",
+                  "            },",
+                  "            \"batchId\": {",
+                  "              \"type\": [",
+                  "                \"string\",",
+                  "                \"null\"",
+                  "              ]",
+                  "            },",
+                  "            \"originalTopic\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"originalPartition\": {",
+                  "              \"type\": \"integer\",",
+                  "              \"minimum\": 0",
+                  "            },",
+                  "            \"originalOffset\": {",
+                  "              \"type\": \"integer\",",
+                  "              \"minimum\": 0",
+                  "            },",
+                  "            \"exceptionClass\": {",
+                  "              \"type\": [",
+                  "                \"string\",",
+                  "                \"null\"",
+                  "              ]",
+                  "            },",
+                  "            \"exceptionMessage\": {",
+                  "              \"type\": [",
+                  "                \"string\",",
+                  "                \"null\"",
+                  "              ]",
+                  "            },",
+                  "            \"status\": {",
+                  "              \"enum\": [",
+                  "                \"PENDING\",",
+                  "                \"REPLAY_REQUESTED\",",
+                  "                \"REPLAYED\",",
+                  "                \"EXHAUSTED\"",
+                  "              ]",
+                  "            },",
+                  "            \"replayCount\": {",
+                  "              \"type\": \"integer\",",
+                  "              \"minimum\": 0,",
+                  "              \"maximum\": 3",
+                  "            },",
+                  "            \"replayable\": {",
+                  "              \"type\": \"boolean\"",
+                  "            },",
+                  "            \"firstSeenAt\": {",
+                  "              \"type\": \"string\",",
+                  "              \"pattern\": \"^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:\\\\d{2}(\\\\.\\\\d+)?Z$\"",
+                  "            },",
+                  "            \"lastReplayedAt\": {",
+                  "              \"type\": [",
+                  "                \"string\",",
+                  "                \"null\"",
+                  "              ],",
+                  "              \"pattern\": \"^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:\\\\d{2}(\\\\.\\\\d+)?Z$\"",
+                  "            },",
+                  "            \"updatedAt\": {",
+                  "              \"type\": \"string\",",
+                  "              \"pattern\": \"^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:\\\\d{2}(\\\\.\\\\d+)?Z$\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      },",
+                  "      \"page\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 0",
+                  "      },",
+                  "      \"size\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 1,",
+                  "        \"maximum\": 100",
+                  "      },",
+                  "      \"totalElements\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 0",
+                  "      },",
+                  "      \"totalPages\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 0",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const deadLetter = body.content.find(function (row) {",
+                  "  return String(row.id) === pm.collectionVariables.get('deadLetterId');",
+                  "});",
+                  "const polls = Number(pm.collectionVariables.get('replayPolls')) || 0;",
+                  "if (deadLetter && deadLetter.status === 'REPLAY_REQUESTED' && polls < 30) {",
+                  "  pm.test('replay still pending, polling again', function () {",
+                  "    pm.expect(deadLetter.replayCount).to.be.within(1, 3);",
+                  "  });",
+                  "  pm.collectionVariables.set('replayPolls', String(polls + 1));",
+                  "  pm.execution.setNextRequest('Wait for the replay outcome');",
+                  "} else {",
+                  "  pm.collectionVariables.set('replayPolls', '0');",
+                  "  pm.test('replay outcome arrived: the dead letter is PENDING or EXHAUSTED again', function () {",
+                  "    pm.expect(deadLetter, 'dead letter ' + pm.collectionVariables.get('deadLetterId')).to.be.an('object');",
+                  "    pm.expect(deadLetter.status).to.be.oneOf(['PENDING', 'EXHAUSTED']);",
+                  "    pm.expect(deadLetter.replayCount).to.eql(Number(pm.collectionVariables.get('deadLetterReplayCount')));",
+                  "  });",
+                  "  pm.test('a failed replay updates the same row: still one dead letter', function () {",
+                  "    pm.expect(body.totalElements).to.eql(1);",
+                  "  });",
+                  "  pm.test('EXHAUSTED exactly when three replays failed', function () {",
+                  "    pm.expect(deadLetter.status === 'EXHAUSTED').to.eql(deadLetter.replayCount >= 3);",
+                  "    pm.expect(deadLetter.replayable).to.eql(deadLetter.status === 'PENDING');",
+                  "  });",
+                  "  pm.collectionVariables.set('deadLetterStatus', deadLetter ? deadLetter.status : '');",
+                  "  if (deadLetter && deadLetter.status === 'EXHAUSTED') {",
+                  "    pm.execution.setNextRequest('Replay of an exhausted dead letter returns 409');",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dead-letters?size=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dead-letters"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Polls every 2 s (at most 30 times) until routing-service has dead-lettered the replayed instruction again. Then continues with another replay while replays are left, or jumps to the exhausted check."
+          },
+          "response": []
+        },
+        {
+          "name": "Replay again until the limit is reached",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('deadLetterReplayCount'));",
+                  "if (pm.collectionVariables.get('deadLetterStatus') === 'PENDING' && count < 3) {",
+                  "  pm.test('replay ' + (count + 1) + ' of 3 is accepted with 202', function () {",
+                  "    pm.response.to.have.status(202);",
+                  "    pm.expect(pm.response.json().status).to.eql('REPLAY_REQUESTED');",
+                  "    pm.expect(pm.response.json().replayCount).to.eql(count + 1);",
+                  "  });",
+                  "  pm.collectionVariables.set('deadLetterStatus', 'REPLAY_REQUESTED');",
+                  "  pm.collectionVariables.set('deadLetterReplayCount', String(count + 1));",
+                  "  pm.execution.setNextRequest('Wait for the replay outcome');",
+                  "} else {",
+                  "  pm.test('no replay left: status code is 409', function () {",
+                  "    pm.response.to.have.status(409);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dead-letters/{{deadLetterId}}/replay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dead-letters",
+                "{{deadLetterId}}",
+                "replay"
+              ]
+            },
+            "description": "Only reached while the dead letter is PENDING with replays left; loops back to \"Wait for the replay outcome\"."
+          },
+          "response": []
+        },
+        {
+          "name": "Replay of an exhausted dead letter returns 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 409', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 409 Conflict', function () {",
+                  "  pm.expect(problem.status).to.eql(409);",
+                  "  pm.expect(problem.title).to.eql('Conflict');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('Dead letter ' + pm.collectionVariables.get('deadLetterId') + ' reached the limit of 3 replays');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/dead-letters/' + pm.collectionVariables.get('deadLetterId') + '/replay');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dead-letters/{{deadLetterId}}/replay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dead-letters",
+                "{{deadLetterId}}",
+                "replay"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     }
