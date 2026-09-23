@@ -2,6 +2,8 @@
 
 api-service serves the operator REST API on port 8080 (`REMIT_API_PORT`). All paths start with `/api/v1`. The OpenAPI document is served at `/v3/api-docs`, Swagger UI at `/swagger-ui.html`, and the build exports the same document to [docs/openapi.json](openapi.json).
 
+For ready-made requests with assertions, import the Postman collection [postman/remit.postman_collection.json](../postman/remit.postman_collection.json) and one of the environments next to it, or run it with `scripts/newman.sh` (see [API tests](../README.md#api-tests-postmannewman)).
+
 ## Endpoints
 
 | Method | Path | Role | Success | Description |
