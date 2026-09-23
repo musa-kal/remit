@@ -62,6 +62,7 @@ Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_
 | `*/Dockerfile` | Multi-stage image build of each service |
 | `samples/` | The five sample batch files (see [Intake](#intake-service)) |
 | `scripts/` | Bash ops scripts: build, deploy, restart, seed SFTP, logs, smoke and performance tests |
+| `postman/` | Postman collection and environments for the operator API ([API tests](#api-tests-postmannewman)) |
 | `docs/api.md` | Operator API reference: endpoints, auth flow, examples, error format |
 | `docs/openapi.json` | OpenAPI document exported by the build |
 | `docs/runbook.md` | Operational procedures (restart a failed batch job, inspect and replay the DLT, rotate the JWT secret) |
@@ -148,6 +149,7 @@ All scripts take `-h` for help, use `set -euo pipefail`, read `.env`, and pass `
 | `scripts/logs.sh <service>` | Follows a service's JSON logs, pretty-printed with jq (`-c` compact, `--no-follow`, `-n LINES`) |
 | `scripts/gen-batch.sh <clientId> <rows>` | Generates a valid batch file; `-r FORCE_FAIL` makes every row fail in routing |
 | `scripts/smoke-test.sh` | End-to-end test of the samples and a dead-letter replay ([Sample walkthrough](#sample-walkthrough)) |
+| `scripts/newman.sh [-e local|docker] [--base-url URL]` | Runs the Postman collection with Newman (cli, JUnit and HTML reports in `newman/`) ([API tests](#api-tests-postmannewman)) |
 | `scripts/perf-test.sh` | NFR-05 measurement with a 10,000-row file ([Measured performance](#measured-performance)) |
 
 Every file lands in `/inbound` under a hidden `.part` name and is renamed once complete, so the poller never reads a partial upload.
@@ -359,6 +361,29 @@ curl -s localhost:8080/api/v1/stats/summary -H "Authorization: Bearer $TOKEN"
 
 Run intake-service and routing-service next to it and drop the samples; [docs/e2e-expectations.md](docs/e2e-expectations.md) lists what the API should then report. The build (`./mvnw -B verify`) regenerates [docs/openapi.json](docs/openapi.json) from the running application.
 
+## API tests (Postman/Newman)
+
+[postman/remit.postman_collection.json](postman/remit.postman_collection.json) is a Postman collection (v2.1) for the operator API, with the folders Auth, Batches, Stats, Instructions, Dead Letters, Audit and Security Negative Cases. Every request asserts the status code, the response shape (`pm.response.to.have.jsonSchema` with inline schemas) and the values in [docs/e2e-expectations.md](docs/e2e-expectations.md): batch statuses and counts per file, the rejected rows with their reason codes and line numbers, the history of the duplicate `ACME-0003`, masked accounts for `operator` and full ones for `admin`, the stats summary, and the audit documents. It also covers paging (`size=101` is clamped to 100), filters, 400 validation errors, 404s, and the security negatives: no token, a malformed token, tokens forged with a wrong secret (one expired, one with admin claims), `alg: none`, an operator on ADMIN-only endpoints (403) and a login with an unknown user (401, audited).
+
+The collection runs against the state that `scripts/smoke-test.sh --reset --keep` leaves behind: the five samples plus the `CHAOS01` batch whose `FORCE_FAIL` instruction is a dead letter with one replay. The Dead Letters folder replays it until it is `EXHAUSTED` (it polls while each replay fails; the whole first run took 18 s here, a repeat run 9 s) and then expects 409; on later runs the dead letter is already `EXHAUSTED` and the same requests take their 409 branch, so the collection can be run again and again against one stack.
+
+```bash
+scripts/smoke-test.sh --reset --keep   # fresh stack with the samples and one dead letter
+scripts/newman.sh                      # local environment, http://localhost:8080/api/v1
+scripts/newman.sh --folder Auth --folder Batches
+docker compose down -v
+```
+
+`scripts/newman.sh` needs `newman` and `newman-reporter-htmlextra` (`npm install -g newman newman-reporter-htmlextra`). It passes `REMIT_OPERATOR_PASSWORD` and `REMIT_ADMIN_PASSWORD` from `.env` to Newman as `--env-var`, writes `newman/junit.xml` and `newman/report.html` (gitignored), and exits with Newman's status. `-e docker` selects [postman/docker.postman_environment.json](postman/docker.postman_environment.json), whose base URL `http://api-service:8080/api/v1` works from a container on the compose network `remit`; `--base-url` overrides either. The same run without the script:
+
+```bash
+newman run postman/remit.postman_collection.json -e postman/docker.postman_environment.json \
+  --env-var operatorPassword=... --env-var adminPassword=... --env-var baseUrl=http://localhost:8080/api/v1 \
+  --reporters cli,junit,htmlextra --reporter-junit-export newman/junit.xml --reporter-htmlextra-export newman/report.html
+```
+
+To use it in the Postman app: Import the collection and [postman/local.postman_environment.json](postman/local.postman_environment.json), select the environment, fill in `operatorPassword` and `adminPassword` (current value only, so they stay out of anything you export), and run the collection with the Runner in folder order; later folders use ids that earlier ones discover. The collection pre-request script logs in as both users with `pm.sendRequest` whenever a token is missing or older than 10 minutes. It never retries a refused login (five failures lock a username for 10 minutes); after fixing a wrong password, clear the collection variable `loginBlockedUntil`.
+
 ## Measured performance
 
 NFR-05 asks that a 10,000-row valid file goes from the SFTP drop to all instructions `ROUTED` in under 60 s on a local compose stack. Measured with `scripts/perf-test.sh --runs 3`: it generates a 10,000-row file with `gen-batch.sh`, takes the start time right before uploading it to `/inbound`, and stops when `GET /api/v1/batches/{id}` reports `ROUTED + REQUIRES_REVIEW = 10000` (polled every 0.5 s). The figure therefore includes the wait for the next SFTP poll, the intake job, routing, and api-service catching up with the status events.
@@ -391,7 +416,7 @@ Also tried without a measurable gain: turning off the MySQL binary log. Delibera
 - [x] M3 Routing: idempotent consumer, retries, dead-letter topic
 - [x] M4 API + security + audit: REST endpoints, JWT and roles, MongoDB audit trail, DLT replay
 - [x] M5 Containers + E2E: Dockerfiles, full compose stack, smoke test, measured throughput
-- [ ] M6 Postman: collection and environments, Newman run
+- [x] M6 Postman: collection and environments, Newman run
 - [ ] M7 CI: Jenkins and SonarQube, quality gate
 - [ ] M8 Kubernetes + scripts: kustomize base and local overlay, ops scripts
 - [ ] M9 Docs: runbook, architecture notes, ADRs
