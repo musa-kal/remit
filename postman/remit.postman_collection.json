@@ -12776,6 +12776,501 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Token signed with the wrong secret returns 401",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// An HS256 token claiming the ADMIN role, signed with the wrong secret.",
+                  "function base64url(words) {",
+                  "  return CryptoJS.enc.Base64.stringify(words).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "}",
+                  "function encode(object) {",
+                  "  return base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(object)));",
+                  "}",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const unsigned = encode({ alg: 'HS256', typ: 'JWT' }) + '.' + encode({",
+                  "  sub: pm.variables.get('adminUsername'),",
+                  "  roles: ['OPERATOR', 'ADMIN'],",
+                  "  iat: now,",
+                  "  exp: now + 600,",
+                  "  jti: 'forged-' + now",
+                  "});",
+                  "const signature = base64url(CryptoJS.HmacSHA256(unsigned, 'not-the-remit-secret-but-at-least-32-bytes'));",
+                  "pm.variables.set('forgedToken', unsigned + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 401 Unauthorized', function () {",
+                  "  pm.expect(problem.status).to.eql(401);",
+                  "  pm.expect(problem.title).to.eql('Unauthorized');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('The access token is invalid');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/audit-events');",
+                  "});",
+                  "pm.test('WWW-Authenticate is Bearer error=\"invalid_token\"', function () {",
+                  "  pm.expect(pm.response.headers.get('WWW-Authenticate')).to.eql('Bearer error=\"invalid_token\"');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{forgedToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/audit-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "audit-events"
+              ]
+            },
+            "description": "A well formed HS256 token with admin claims, signed with a secret the API does not know."
+          },
+          "response": []
+        },
+        {
+          "name": "Expired token returns 401",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// An HS256 token that expired 30 minutes ago, signed with the wrong secret.",
+                  "function base64url(words) {",
+                  "  return CryptoJS.enc.Base64.stringify(words).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "}",
+                  "function encode(object) {",
+                  "  return base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(object)));",
+                  "}",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const unsigned = encode({ alg: 'HS256', typ: 'JWT' }) + '.' + encode({",
+                  "  sub: pm.variables.get('operatorUsername'),",
+                  "  roles: ['OPERATOR'],",
+                  "  iat: now - 3600,",
+                  "  exp: now - 1800,",
+                  "  jti: 'expired-' + now",
+                  "});",
+                  "const signature = base64url(CryptoJS.HmacSHA256(unsigned, 'not-the-remit-secret-but-at-least-32-bytes'));",
+                  "pm.variables.set('forgedToken', unsigned + '.' + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 401 Unauthorized', function () {",
+                  "  pm.expect(problem.status).to.eql(401);",
+                  "  pm.expect(problem.title).to.eql('Unauthorized');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('The access token is invalid');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/batches');",
+                  "});",
+                  "pm.test('WWW-Authenticate is Bearer error=\"invalid_token\"', function () {",
+                  "  pm.expect(pm.response.headers.get('WWW-Authenticate')).to.eql('Bearer error=\"invalid_token\"');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{forgedToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "batches"
+              ]
+            },
+            "description": "The API secret is not available to the collection, so the expired token is forged as well: it must be refused whichever check fails first."
+          },
+          "response": []
+        },
+        {
+          "name": "Unsigned token (alg none) returns 401",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A token with alg none and no signature.",
+                  "function base64url(words) {",
+                  "  return CryptoJS.enc.Base64.stringify(words).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "}",
+                  "function encode(object) {",
+                  "  return base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(object)));",
+                  "}",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "const unsigned = encode({ alg: 'none', typ: 'JWT' }) + '.' + encode({",
+                  "  sub: pm.variables.get('adminUsername'),",
+                  "  roles: ['OPERATOR', 'ADMIN'],",
+                  "  iat: now,",
+                  "  exp: now + 600,",
+                  "  jti: 'forged-' + now",
+                  "});",
+                  "pm.variables.set('forgedToken', unsigned + '.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 401 Unauthorized', function () {",
+                  "  pm.expect(problem.status).to.eql(401);",
+                  "  pm.expect(problem.title).to.eql('Unauthorized');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('The access token is invalid');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/audit-events');",
+                  "});",
+                  "pm.test('WWW-Authenticate is Bearer error=\"invalid_token\"', function () {",
+                  "  pm.expect(pm.response.headers.get('WWW-Authenticate')).to.eql('Bearer error=\"invalid_token\"');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{forgedToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/audit-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "audit-events"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Basic credentials instead of a bearer token return 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test('body matches the ProblemDetail schema', function () {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    \"type\": \"object\",",
+                  "    \"required\": [",
+                  "      \"type\",",
+                  "      \"title\",",
+                  "      \"status\",",
+                  "      \"detail\",",
+                  "      \"instance\"",
+                  "    ],",
+                  "    \"properties\": {",
+                  "      \"type\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"title\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"status\": {",
+                  "        \"type\": \"integer\",",
+                  "        \"minimum\": 400,",
+                  "        \"maximum\": 599",
+                  "      },",
+                  "      \"detail\": {",
+                  "        \"type\": \"string\"",
+                  "      },",
+                  "      \"instance\": {",
+                  "        \"type\": \"string\",",
+                  "        \"pattern\": \"^/\"",
+                  "      },",
+                  "      \"errors\": {",
+                  "        \"type\": \"array\",",
+                  "        \"minItems\": 1,",
+                  "        \"items\": {",
+                  "          \"type\": \"object\",",
+                  "          \"required\": [",
+                  "            \"field\",",
+                  "            \"message\"",
+                  "          ],",
+                  "          \"properties\": {",
+                  "            \"field\": {",
+                  "              \"type\": \"string\"",
+                  "            },",
+                  "            \"message\": {",
+                  "              \"type\": \"string\"",
+                  "            }",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "const problem = pm.response.json();",
+                  "pm.test('problem says 401 Unauthorized', function () {",
+                  "  pm.expect(problem.status).to.eql(401);",
+                  "  pm.expect(problem.title).to.eql('Unauthorized');",
+                  "});",
+                  "pm.test('problem detail explains the error', function () {",
+                  "  pm.expect(problem.detail).to.eql('Authentication is required: send a bearer token');",
+                  "});",
+                  "pm.test('problem instance is the request path', function () {",
+                  "  pm.expect(problem.instance).to.eql('/api/v1/batches');",
+                  "});",
+                  "pm.test('WWW-Authenticate is Bearer', function () {",
+                  "  pm.expect(pm.response.headers.get('WWW-Authenticate')).to.eql('Bearer');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic bm9ib2R5Om5vdGhpbmc="
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "batches"
+              ]
+            },
+            "description": "HTTP Basic is not enabled; the credentials (nobody:nothing) are never checked."
+          },
+          "response": []
         }
       ]
     }
