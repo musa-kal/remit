@@ -1,0 +1,120 @@
+# Jenkins Configuration as Code for the Remit CI controller. Applied on every start, so the
+# controller is rebuilt from this file and ci/.env alone.
+#
+# ${NAME} values are read from /run/secrets/NAME: ci/docker-compose.jenkins.yml mounts every
+# value of ci/.env that Jenkins needs as a compose secret, so none of them sits in the
+# controller's environment (which builds on the built-in node would inherit). ${NAME:-default}
+# is used where ci/setup.sh fills the value in later (the SonarQube token).
+jenkins:
+  systemMessage: "Remit CI: the remit job builds, tests and analyses the repository mounted at /repo."
+  # The pipeline runs on the controller; disableConcurrentBuilds keeps it to one build at a time.
+  numExecutors: 2
+  mode: NORMAL
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          name: "Remit CI admin"
+          password: "${JENKINS_ADMIN_PASSWORD}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  crumbIssuer:
+    standard:
+      excludeClientIPFromCrumb: true
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - string:
+              scope: GLOBAL
+              id: "sonar-token"
+              description: "SonarQube user token (written by ci/setup.sh)"
+              secret: "${SONAR_TOKEN:-not-configured-run-ci-setup-sh}"
+          - string:
+              scope: GLOBAL
+              id: "remit-operator-password"
+              description: "Password of the seeded operator user"
+              secret: "${REMIT_OPERATOR_PASSWORD}"
+          - string:
+              scope: GLOBAL
+              id: "remit-admin-password"
+              description: "Password of the seeded admin user"
+              secret: "${REMIT_ADMIN_PASSWORD}"
+          - string:
+              scope: GLOBAL
+              id: "remit-jwt-secret"
+              description: "HS256 signing key of api-service"
+              secret: "${REMIT_JWT_SECRET}"
+          - string:
+              scope: GLOBAL
+              id: "remit-mysql-root-password"
+              description: "MySQL root password of the compose stack"
+              secret: "${MYSQL_ROOT_PASSWORD}"
+          - string:
+              scope: GLOBAL
+              id: "remit-intake-db-password"
+              description: "MySQL password of remit_intake"
+              secret: "${REMIT_INTAKE_DB_PASSWORD}"
+          - string:
+              scope: GLOBAL
+              id: "remit-routing-db-password"
+              description: "MySQL password of remit_routing"
+              secret: "${REMIT_ROUTING_DB_PASSWORD}"
+          - string:
+              scope: GLOBAL
+              id: "remit-api-db-password"
+              description: "MySQL password of remit_api"
+              secret: "${REMIT_API_DB_PASSWORD}"
+          - string:
+              scope: GLOBAL
+              id: "remit-mongo-root-password"
+              description: "MongoDB root password of the compose stack"
+              secret: "${MONGO_ROOT_PASSWORD}"
+          - string:
+              scope: GLOBAL
+              id: "remit-mongo-password"
+              description: "MongoDB password of remit_audit"
+              secret: "${REMIT_MONGO_PASSWORD}"
+          - string:
+              scope: GLOBAL
+              id: "remit-sftp-password"
+              description: "Password of the SFTP drop zone user"
+              secret: "${REMIT_SFTP_PASSWORD}"
+
+unclassified:
+  location:
+    url: "http://localhost:8090/"
+  sonarGlobalConfiguration:
+    buildWrapperEnabled: false
+    installations:
+      - name: "sonarqube"
+        serverUrl: "http://sonarqube:9000"
+        credentialsId: "sonar-token"
+
+# Job DSL: the pipeline job, defined from the Jenkinsfile in the repository.
+# The repository is the host checkout, bind mounted read only at /repo; the clone runs inside this
+# container, so its path never has to exist on the dind daemon. A real deployment would point at
+# https://github.com/Musa-Kal/remit.git with a credentialsId instead of file:///repo.
+jobs:
+  - script: >
+      pipelineJob('remit') {
+        displayName('remit')
+        description('Remit pipeline: static checks, build and test, SonarQube analysis and quality gate, Docker images, end-to-end smoke test, Postman API tests.')
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url('file:///repo')
+                }
+                branch('*/main')
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(false)
+          }
+        }
+      }
