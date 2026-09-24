@@ -69,7 +69,7 @@ public class RoutedInstructionListener {
       Map<String, Object> details = new LinkedHashMap<>();
       details.put("topic", record.topic());
       details.put("channel", instruction.channel());
-      details.put("routingStatus", routingStatus);
+      details.put(ROUTING_STATUS_HEADER, routingStatus);
       details.put("instructionRef", instruction.instructionRef());
       details.put("amount", instruction.amount());
       details.put("currency", instruction.currency());
