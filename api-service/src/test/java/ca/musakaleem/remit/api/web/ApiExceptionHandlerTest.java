@@ -165,7 +165,9 @@ class ApiExceptionHandlerTest {
   }
 
   @SuppressWarnings("unused")
-  private void sample(String body) {}
+  private void sample(String body) {
+    // Never called: only its signature is used, as the MethodParameter of a validation failure.
+  }
 
   private static PropertyReferenceException propertyReference(String name) {
     return new PropertyReferenceException(name, TypeInformation.of(Object.class), List.of());
