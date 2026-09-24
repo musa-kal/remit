@@ -1,6 +1,7 @@
 package ca.musakaleem.remit.intake.publish;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -111,7 +112,7 @@ class IntakeEventPublisherTest {
 
   @Test
   void awaitAllReturnsWhenEverySendIsAcknowledged() {
-    publisher.awaitAll(List.of(ack(), ack()));
+    assertThatCode(() -> publisher.awaitAll(List.of(ack(), ack()))).doesNotThrowAnyException();
   }
 
   @Test
