@@ -59,8 +59,6 @@
     <sonar.java.source>17</sonar.java.source>
     <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
     <sonar.coverage.exclusions>**/*Application.java</sonar.coverage.exclusions>
-    <!-- Analyse with the build JDK instead of downloading a JRE from the server. -->
-    <sonar.scanner.skipJreProvisioning>true</sonar.scanner.skipJreProvisioning>
   </properties>
 
   <modules>
