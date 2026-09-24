@@ -1,0 +1,164 @@
+# Local CI for Remit: Jenkins, a Docker-in-Docker daemon for the pipeline, SonarQube and its
+# PostgreSQL. Run from the repository root through ci/setup.sh, or:
+#   docker compose -f ci/docker-compose.jenkins.yml --env-file ci/.env up -d --build
+# Jenkins: http://localhost:8090   SonarQube: http://localhost:9000
+# Why a dind sidecar instead of the host socket: docs/decisions/0012-ci-docker-strategy.md.
+
+name: remit-ci
+
+services:
+  jenkins:
+    build:
+      context: .
+      dockerfile: jenkins/Dockerfile
+    image: remit-ci/jenkins:latest
+    environment:
+      # No setup wizard; git may clone the local repository at file:///repo (off by default since
+      # SECURITY-2478); relaxed CSP so the Newman htmlextra report renders in publishHTML.
+      JAVA_OPTS: >-
+        -Djenkins.install.runSetupWizard=false
+        -Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true
+        -Dhudson.model.DirectoryBrowserSupport.CSP=
+        -Xmx768m
+      # Every docker call of the pipeline (Testcontainers, docker build, compose) goes to dind.
+      DOCKER_HOST: tcp://dind:2375
+      # Containers started by Testcontainers publish their ports on dind, not on localhost.
+      TESTCONTAINERS_HOST_OVERRIDE: dind
+    ports:
+      - "${JENKINS_PORT:-8090}:8080"
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      # The repository the remit job clones (file:///repo). Read only: the build runs in a clone.
+      - ${REMIT_REPO_DIR:-..}:/repo:ro
+    secrets:
+      - JENKINS_ADMIN_PASSWORD
+      - SONAR_TOKEN
+      - REMIT_OPERATOR_PASSWORD
+      - REMIT_ADMIN_PASSWORD
+      - REMIT_JWT_SECRET
+      - MYSQL_ROOT_PASSWORD
+      - REMIT_INTAKE_DB_PASSWORD
+      - REMIT_ROUTING_DB_PASSWORD
+      - REMIT_API_DB_PASSWORD
+      - MONGO_ROOT_PASSWORD
+      - REMIT_MONGO_PASSWORD
+      - REMIT_SFTP_PASSWORD
+    networks:
+      - ci
+    depends_on:
+      dind:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8080/login || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # Docker daemon for the pipeline. The Jenkins home volume is mounted at the same path as in the
+  # jenkins container, so a bind mount of a workspace file (./docker/mysql/init.sql in the remit
+  # compose file) names a path that exists on this daemon too.
+  dind:
+    image: docker:28-dind
+    privileged: true
+    environment:
+      # Plain TCP on the internal ci network only; the port is not published on the host.
+      DOCKER_TLS_CERTDIR: ""
+    command: ["--host=tcp://0.0.0.0:2375", "--host=unix:///var/run/docker.sock"]
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - dind-data:/var/lib/docker
+    networks:
+      - ci
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  sonarqube:
+    image: sonarqube:community
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?set SONAR_DB_PASSWORD in ci/.env}
+      # Skips the vm.max_map_count check of the embedded Elasticsearch (fine for a local server).
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    ports:
+      - "${SONARQUBE_PORT:-9000}:9000"
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube-extensions:/opt/sonarqube/extensions
+      - sonarqube-logs:/opt/sonarqube/logs
+    networks:
+      - ci
+    depends_on:
+      sonar-db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  sonar-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?set SONAR_DB_PASSWORD in ci/.env}
+      POSTGRES_DB: sonar
+    volumes:
+      - sonar-db-data:/var/lib/postgresql/data
+    networks:
+      - ci
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar -d sonar"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+# Values of ci/.env handed to Jenkins as files in /run/secrets, where Configuration as Code reads
+# them; they never enter the controller's environment.
+secrets:
+  JENKINS_ADMIN_PASSWORD:
+    environment: JENKINS_ADMIN_PASSWORD
+  SONAR_TOKEN:
+    environment: SONAR_TOKEN
+  REMIT_OPERATOR_PASSWORD:
+    environment: REMIT_OPERATOR_PASSWORD
+  REMIT_ADMIN_PASSWORD:
+    environment: REMIT_ADMIN_PASSWORD
+  REMIT_JWT_SECRET:
+    environment: REMIT_JWT_SECRET
+  MYSQL_ROOT_PASSWORD:
+    environment: MYSQL_ROOT_PASSWORD
+  REMIT_INTAKE_DB_PASSWORD:
+    environment: REMIT_INTAKE_DB_PASSWORD
+  REMIT_ROUTING_DB_PASSWORD:
+    environment: REMIT_ROUTING_DB_PASSWORD
+  REMIT_API_DB_PASSWORD:
+    environment: REMIT_API_DB_PASSWORD
+  MONGO_ROOT_PASSWORD:
+    environment: MONGO_ROOT_PASSWORD
+  REMIT_MONGO_PASSWORD:
+    environment: REMIT_MONGO_PASSWORD
+  REMIT_SFTP_PASSWORD:
+    environment: REMIT_SFTP_PASSWORD
+
+networks:
+  ci:
+    name: remit-ci
+
+volumes:
+  jenkins-home:
+  dind-data:
+  sonarqube-data:
+  sonarqube-extensions:
+  sonarqube-logs:
+  sonar-db-data:
