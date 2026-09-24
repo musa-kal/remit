@@ -50,6 +50,10 @@ public class SecurityConfig {
    * @throws Exception when the configuration is invalid
    */
   @Bean
+  // CSRF protection is off on purpose (reviewed for SonarQube rule S4502): the API is stateless and
+  // reads credentials only from the Authorization header, never from cookies or a session, so a
+  // cross-site request cannot carry them. See ADR 0004.
+  @SuppressWarnings("java:S4502")
   public SecurityFilterChain apiSecurity(
       HttpSecurity http,
       JwtService jwtService,
