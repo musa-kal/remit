@@ -1,0 +1,2 @@
+# Secrets of the local CI stack (created by ci/setup.sh from .env.example).
+.env
