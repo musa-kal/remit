@@ -19,7 +19,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class MongoAuditEventStore implements AuditEventStore {
 
-  private static final Sort NEWEST_FIRST = Sort.by(Sort.Direction.DESC, "occurredAt");
+  private static final String OCCURRED_AT = "occurredAt";
+  private static final Sort NEWEST_FIRST = Sort.by(Sort.Direction.DESC, OCCURRED_AT);
 
   private final MongoTemplate mongo;
 
@@ -61,10 +62,10 @@ public class MongoAuditEventStore implements AuditEventStore {
       conditions.add(Criteria.where("eventType").is(query.eventType().name()));
     }
     if (query.from() != null) {
-      conditions.add(Criteria.where("occurredAt").gte(query.from()));
+      conditions.add(Criteria.where(OCCURRED_AT).gte(query.from()));
     }
     if (query.to() != null) {
-      conditions.add(Criteria.where("occurredAt").lt(query.to()));
+      conditions.add(Criteria.where(OCCURRED_AT).lt(query.to()));
     }
     return conditions.isEmpty()
         ? new Query()
