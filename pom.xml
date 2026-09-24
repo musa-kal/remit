@@ -48,12 +48,19 @@
     <sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
     <dependency-check-maven.version>12.2.2</dependency-check-maven.version>
 
-    <!-- SonarQube analysis (run with `mvn sonar:sonar`; host and token come from the CI env). -->
-    <sonar.projectKey>remit</sonar.projectKey>
+    <!--
+      SonarQube analysis: `./mvnw sonar:sonar` after `verify` (Jenkinsfile stage "SonarQube
+      analysis"); host and token come from withSonarQubeEnv. The coverage path is resolved per
+      module, so each module reports its own target/site/jacoco/jacoco.xml (unit and integration
+      tests together, see the jacoco plugin below).
+    -->
+    <sonar.projectKey>ca.musakaleem.remit:remit</sonar.projectKey>
     <sonar.projectName>Remit</sonar.projectName>
     <sonar.java.source>17</sonar.java.source>
     <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
     <sonar.coverage.exclusions>**/*Application.java</sonar.coverage.exclusions>
+    <!-- Analyse with the build JDK instead of downloading a JRE from the server. -->
+    <sonar.scanner.skipJreProvisioning>true</sonar.scanner.skipJreProvisioning>
   </properties>
 
   <modules>
