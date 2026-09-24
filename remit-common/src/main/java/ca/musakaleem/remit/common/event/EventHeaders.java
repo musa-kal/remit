@@ -60,10 +60,10 @@ public final class EventHeaders {
    */
   public static List<Header> build(
       UUID eventId, EventType type, String correlationId, Instant occurredAt) {
-    Objects.requireNonNull(eventId, "eventId");
+    Objects.requireNonNull(eventId, EVENT_ID);
     Objects.requireNonNull(type, "type");
-    Objects.requireNonNull(correlationId, "correlationId");
-    Objects.requireNonNull(occurredAt, "occurredAt");
+    Objects.requireNonNull(correlationId, CORRELATION_ID);
+    Objects.requireNonNull(occurredAt, OCCURRED_AT);
     return List.of(
         header(EVENT_ID, eventId.toString()),
         header(EVENT_TYPE, type.name()),
