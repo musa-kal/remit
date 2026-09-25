@@ -231,3 +231,17 @@ api-service signs tokens with one HS256 key, `REMIT_JWT_SECRET` ([ADR 0004](deci
 4. Check: `curl -s localhost:8080/actuator/health/readiness` is `UP`, a login returns a token, and an old token now gets 401.
 
 If api-service does not start, its log says why: `REMIT_JWT_SECRET is not set` or `REMIT_JWT_SECRET is N bytes long; HS256 needs at least 32 bytes`.
+
+## Run the CI pipeline and refresh its evidence
+
+The Jenkins pipeline runs on the local CI stack ([ci/README.md](../ci/README.md)).
+
+1. Commit: the job clones `main` from the repository mounted at `/repo`, so uncommitted changes are not built.
+2. `ci/setup.sh` starts (or checks) SonarQube and Jenkins. It is safe to rerun: it keeps a valid SonarQube token and does not restart a Jenkins whose image and configuration are unchanged.
+3. Open <http://localhost:8090/job/remit/> (admin, `JENKINS_ADMIN_PASSWORD` from `ci/.env`) and click **Build Now**. A failed stage shows its log under the stage; the E2E and API test stages also archive `compose-ps.txt` and `compose-logs.txt`.
+4. If the quality gate fails, open <http://localhost:9000/dashboard?id=ca.musakaleem.remit:remit>, fix the reported code, commit, and build again. Do not relax the gate.
+5. The screenshots in `docs/img/` come from a green build: the job's **Full Stage View** (`jenkins-pipeline-green.png`), the build's **Tests** page (`jenkins-tests.png`), the SonarQube project overview with **Overall Code** selected (`sonarqube-dashboard.png`) and **Quality Gates > remit** (`sonarqube-quality-gate.png`), each at a 1400 px wide window and under 500 KB.
+
+### Rotate the SonarQube token
+
+Revoke the token `jenkins` of the user admin in SonarQube (**My Account > Security**) and rerun `ci/setup.sh`: it finds the stored token invalid, generates a new one, writes it to `ci/.env` and recreates the Jenkins container so the credential `sonar-token` holds it.
