@@ -65,6 +65,9 @@ Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_
 | `samples/` | The five sample batch files (see [Intake](#intake-service)) |
 | `scripts/` | Bash ops scripts: build, deploy, restart, seed SFTP, logs, smoke and performance tests |
 | `postman/` | Postman collection and environments for the operator API ([API tests](#api-tests-postmannewman)) |
+| `Jenkinsfile` | Declarative CI pipeline ([CI](#ci)) |
+| `ci/` | Local Jenkins, Docker-in-Docker and SonarQube stack with its setup script ([ci/README.md](ci/README.md)) |
+| `.github/workflows/ci.yml` | GitHub Actions mirror of the static checks and the build |
 | `docs/api.md` | Operator API reference: endpoints, auth flow, examples, error format |
 | `docs/openapi.json` | OpenAPI document exported by the build |
 | `docs/runbook.md` | Operational procedures (restart a failed batch job, inspect and replay the DLT, rotate the JWT secret) |
