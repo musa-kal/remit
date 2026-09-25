@@ -50,14 +50,14 @@
 
     <!--
       SonarQube analysis: `./mvnw sonar:sonar` after `verify` (Jenkinsfile stage "SonarQube
-      analysis"); host and token come from withSonarQubeEnv. The coverage path is resolved per
-      module, so each module reports its own target/site/jacoco/jacoco.xml (unit and integration
-      tests together, see the jacoco plugin below).
+      analysis"); host and token come from withSonarQubeEnv. Each module sets
+      sonar.coverage.jacoco.xmlReportPaths to its own target/site/jacoco/jacoco.xml (unit and
+      integration tests together, see the jacoco plugin below); this aggregator has no code, and
+      a path set here would make SonarQube warn about the report it cannot find.
     -->
     <sonar.projectKey>ca.musakaleem.remit:remit</sonar.projectKey>
     <sonar.projectName>Remit</sonar.projectName>
     <sonar.java.source>17</sonar.java.source>
-    <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
     <sonar.coverage.exclusions>**/*Application.java</sonar.coverage.exclusions>
   </properties>
 

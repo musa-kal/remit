@@ -15,6 +15,11 @@
   <name>Remit :: Common</name>
   <description>Shared event records, enums, JSON config and masking utilities.</description>
 
+  <properties>
+    <!-- This module's JaCoCo XML report (unit and integration tests) for SonarQube. -->
+    <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+  </properties>
+
   <dependencies>
     <!-- Versions come from the Spring Boot BOM so every service agrees on them. -->
     <dependency>

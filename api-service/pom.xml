@@ -21,6 +21,8 @@
     <springdoc-openapi.version>2.8.17</springdoc-openapi.version>
     <!-- HS256 tokens, see docs/decisions/0004-jwt-approach.md. -->
     <jjwt.version>0.12.7</jjwt.version>
+    <!-- This module's JaCoCo XML report (unit and integration tests) for SonarQube. -->
+    <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
   </properties>
 
   <dependencies>

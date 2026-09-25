@@ -17,6 +17,8 @@
 
   <properties>
     <logstash-logback-encoder.version>8.1</logstash-logback-encoder.version>
+    <!-- This module's JaCoCo XML report (unit and integration tests) for SonarQube. -->
+    <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
   </properties>
 
   <dependencies>
