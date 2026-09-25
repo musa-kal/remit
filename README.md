@@ -1,5 +1,7 @@
 # Remit
 
+[![CI](https://github.com/Musa-Kal/remit/actions/workflows/ci.yml/badge.svg)](https://github.com/Musa-Kal/remit/actions/workflows/ci.yml)
+
 Remit is a payment file gateway. Clients drop CSV payment batch files on an SFTP server; `intake-service` picks them up, validates every payment instruction with Spring Batch, and publishes valid instructions to Kafka. `routing-service` consumes those instructions idempotently and routes each one to a payment channel (EFT, WIRE, INTERAC), dead-lettering failures after retries. `api-service` gives operators a JWT-secured REST API to monitor batches, inspect rejected rows, and replay dead-lettered messages, and it writes every state change to an append-only audit trail in MongoDB. No real money moves and no real bank is involved: channel limits and rules are illustrative.
 
 ## Architecture
