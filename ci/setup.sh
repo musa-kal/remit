@@ -228,7 +228,10 @@ fi
 # --- 8. Jenkins ---------------------------------------------------------------------------------
 
 log_info "building and starting dind and Jenkins"
-ci_compose up -d --build dind jenkins
+# Without the default provenance attestation (it carries a timestamp) an unchanged image keeps its
+# id, so a rerun does not recreate, and restart, a Jenkins that may be running a build.
+BUILDX_NO_DEFAULT_ATTESTATIONS=1 ci_compose build jenkins
+ci_compose up -d dind jenkins
 if [[ "${token_changed}" == true ]]; then
   # Compose writes secrets when it creates the container; recreate it to hand over the new token.
   ci_compose up -d --force-recreate --no-deps jenkins
