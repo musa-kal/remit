@@ -167,18 +167,19 @@ fi
 
 # metric|operator|error threshold. GT fails above the threshold, LT below it. The new-code
 # conditions are the spec's; the overall ones make the gate meaningful on the first analysis,
-# which has no new code yet.
+# which has no new code yet. Duplication must stay below 3%: the threshold is 2.9 because SonarQube
+# shows thresholds with one decimal (2.99 would read as 3.0).
 conditions=(
   "new_coverage|LT|80"
   "new_blocker_violations|GT|0"
   "new_critical_violations|GT|0"
   "new_vulnerabilities|GT|0"
-  "new_duplicated_lines_density|GT|2.99"
+  "new_duplicated_lines_density|GT|2.9"
   "coverage|LT|80"
   "blocker_violations|GT|0"
   "critical_violations|GT|0"
   "vulnerabilities|GT|0"
-  "duplicated_lines_density|GT|2.99"
+  "duplicated_lines_density|GT|2.9"
 )
 gate_json="$(sonar GET "/api/qualitygates/show?name=${GATE}")"
 for condition in "${conditions[@]}"; do

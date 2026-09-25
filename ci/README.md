@@ -104,7 +104,7 @@ The E2E stage writes the workspace `.env` from these bindings (non-secret values
 | Blocker issues | above 0 | new code and overall |
 | Critical issues | above 0 | new code and overall |
 | Vulnerabilities | above 0 | new code and overall |
-| Duplicated lines | 2.99% or more, that is the gate requires less than 3% | new code and overall |
+| Duplicated lines | above 2.9%, so the value must stay below the spec's 3% (SonarQube shows thresholds with one decimal, so 2.99 would display as 3.0) | new code and overall |
 | Issues (Sonar way) | above 0 | new code |
 | Security hotspots reviewed (Sonar way) | below 100% | new code |
 
