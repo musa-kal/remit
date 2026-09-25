@@ -74,7 +74,7 @@ class IntakeApplicationIT extends AbstractIntakeIT {
               .allTopicNames()
               .get();
 
-      assertThat(topics.values()).allSatisfy(t -> assertThat(t.partitions()).hasSize(3));
+      assertThat(topics.values()).hasSize(3).allSatisfy(t -> assertThat(t.partitions()).hasSize(3));
     }
   }
 
