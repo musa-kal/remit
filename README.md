@@ -82,6 +82,7 @@ Requires JDK 17. The Maven wrapper downloads Maven 3.9.9 on first use.
 ./mvnw -B verify          # compile, unit + integration tests, Spotless check, JaCoCo gate
 ./mvnw -B spotless:apply  # reformat Java sources with google-java-format
 ./mvnw -B -Powasp verify  # optional OWASP dependency report (target/dependency-check-report.html)
+./mvnw -B sonar:sonar     # SonarQube analysis after verify (-Dsonar.host.url=... -Dsonar.token=...; CI: ci/README.md)
 ```
 
 The JaCoCo check fails any module whose line coverage drops below 80%.
