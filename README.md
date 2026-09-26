@@ -103,7 +103,7 @@ To drop the samples without the checks, run `scripts/seed-sftp.sh` instead of th
 Then:
 
 - Swagger UI: <http://localhost:8080/swagger-ui.html> (log in with `POST /api/v1/auth/login` as `operator` or `admin` and the passwords from `.env`, then use **Authorize** with the token)
-- Kafka UI: `docker compose --profile tools up -d kafka-ui`, then <http://localhost:8090>
+- Kafka UI: `docker compose --profile tools up -d kafka-ui`, then <http://localhost:8090> (the local Jenkins of [CI](#ci) uses 8090 too; set `KAFKA_UI_PORT` in `.env` when both run)
 - Logs: `scripts/logs.sh intake-service` (JSON, pretty-printed with jq)
 - Stop: `docker compose down` (keeps data) or `docker compose down -v` (deletes all volumes)
 
