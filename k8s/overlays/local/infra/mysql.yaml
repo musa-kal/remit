@@ -1,0 +1,140 @@
+# MySQL 8.4 for the local overlay: one pod, one small volume. On the first start (empty volume)
+# the image runs docker/mysql/init.sql and init-users.sh from the mysql-init ConfigMap: three
+# schemas and one least-privilege user per service, exactly as in docker compose.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels:
+    app.kubernetes.io/name: mysql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: database
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mysql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mysql
+        app.kubernetes.io/component: database
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The image's mysql user; the entrypoint skips its root-only steps when started as it.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          imagePullPolicy: IfNotPresent
+          # Same local trade-off as compose (ADR 0011): flush the redo log once a second instead
+          # of on every commit and do not fsync the binary log.
+          args: ["--innodb-flush-log-at-trx-commit=2", "--sync-binlog=0"]
+          ports:
+            - name: mysql
+              containerPort: 3306
+          env:
+            - name: TZ
+              value: UTC
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: MYSQL_ROOT_PASSWORD
+            # Read by init-users.sh on the first start.
+            - name: REMIT_INTAKE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_INTAKE_DB_PASSWORD
+            - name: REMIT_ROUTING_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_ROUTING_DB_PASSWORD
+            - name: REMIT_API_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_API_DB_PASSWORD
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          # TCP on 127.0.0.1 only answers once the init scripts are done: the temporary server
+          # the image starts during init has networking disabled.
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -h 127.0.0.1 -uroot -e 'SELECT 1' >/dev/null
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -h 127.0.0.1 -uroot -e 'SELECT 1' >/dev/null
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin -h 127.0.0.1 -uroot ping >/dev/null
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: init
+          configMap:
+            name: mysql-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
