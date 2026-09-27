@@ -1,0 +1,21 @@
+# Kustomize base: the three Remit services and their shared configuration. It expects MySQL,
+# MongoDB, Kafka and SFTP to be reachable as mysql, mongo, kafka and sftp in the same namespace
+# and the remit-secrets Secret to exist (scripts/k8s-secrets.sh). overlays/local adds that
+# infrastructure for a kind cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: remit
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: remit
+    includeTemplates: true
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - intake-service/deployment.yaml
+  - intake-service/service.yaml
+  - routing-service/deployment.yaml
+  - routing-service/service.yaml
+  - routing-service/pdb.yaml
+  - api-service/deployment.yaml
+  - api-service/service.yaml
