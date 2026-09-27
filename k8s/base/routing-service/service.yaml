@@ -1,0 +1,15 @@
+# Cluster-internal address of the routing-service actuator (health, info, metrics).
+apiVersion: v1
+kind: Service
+metadata:
+  name: routing-service
+  labels:
+    app.kubernetes.io/name: routing-service
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: routing-service
+  ports:
+    - name: http
+      port: 8082
+      targetPort: http

@@ -1,0 +1,121 @@
+# routing-service: idempotent consumer of payments.instructions (spec section 6). Two replicas
+# share the consumer group routing-service, so Kafka splits the partitions between them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: routing-service
+  labels:
+    app.kubernetes.io/name: routing-service
+    app.kubernetes.io/component: routing
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: routing-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: routing-service
+        app.kubernetes.io/component: routing
+    spec:
+      automountServiceAccountToken: false
+      # Service links would add variables such as KAFKA_PORT=tcp://... to the environment.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Waits until MySQL and Kafka accept connections (see intake-service for the details).
+        - name: wait-for-dependencies
+          image: remit/routing-service:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              for dep in mysql:3306 kafka:9092; do
+                until timeout 2 bash -c "exec 3<>/dev/tcp/${dep%:*}/${dep#*:}" 2>/dev/null; do
+                  echo "waiting for ${dep}"
+                  sleep 2
+                done
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: routing-service
+          image: remit/routing-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: remit-config
+          env:
+            - name: REMIT_ROUTING_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_ROUTING_DB_PASSWORD
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          # Liveness and readiness only begin once the startup probe has passed (up to 200 s).
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 36
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
