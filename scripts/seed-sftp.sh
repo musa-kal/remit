@@ -10,7 +10,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF_USAGE'
-Usage: scripts/seed-sftp.sh [-h] [--via compose|sftp] [file...]
+Usage: scripts/seed-sftp.sh [-h] [--via compose|kubectl|sftp] [file...]
 
 Uploads the given CSV files (default: every samples/*.csv) to /inbound on the SFTP server.
 
@@ -18,6 +18,8 @@ Options:
   --via compose  (default) stream each file into the running compose sftp container with
                  docker compose exec, owned by the SFTP user. Needs only the docker CLI, so it
                  works on Git Bash for Windows and in a Jenkins agent.
+  --via kubectl  the same through kubectl exec into the sftp pod of the local Kubernetes overlay
+                 (namespace remit, context kind-remit or REMIT_KUBE_CONTEXT)
   --via sftp     upload with the sftp client over SSH, the way a real client would. Needs
                  sftp and sshpass (the password comes from REMIT_SFTP_PASSWORD).
   -h, --help     show this help
@@ -27,10 +29,12 @@ Environment (read from .env when not set):
   REMIT_SFTP_PASSWORD  its password (sftp mode only)
   REMIT_SFTP_HOST      host for sftp mode (default localhost)
   REMIT_SFTP_PORT      port for sftp mode (default 2222)
+  REMIT_KUBE_CONTEXT   kubectl context for kubectl mode (default kind-remit; empty for current)
 
 Examples:
   scripts/seed-sftp.sh
   scripts/seed-sftp.sh samples/PAY_ACME01_20261015093000.csv
+  scripts/seed-sftp.sh --via kubectl
   scripts/seed-sftp.sh --via sftp /tmp/PAY_LOAD01_20261015120000.csv
 EOF_USAGE
 }
@@ -44,7 +48,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --via)
-      [[ $# -ge 2 ]] || die "--via needs compose or sftp"
+      [[ $# -ge 2 ]] || die "--via needs compose, kubectl or sftp"
       via="$2"
       shift
       ;;
@@ -54,7 +58,10 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
-[[ "${via}" == compose || "${via}" == sftp ]] || die "--via must be compose or sftp, got '${via}'"
+case "${via}" in
+  compose | kubectl | sftp) ;;
+  *) die "--via must be compose, kubectl or sftp, got '${via}'" ;;
+esac
 
 if [[ ${#files[@]} -eq 0 ]]; then
   shopt -s nullglob
@@ -89,6 +96,21 @@ seed_via_compose() {
   # shellcheck disable=SC2016 # expanded by the container's sh, not here
   compose exec -T -u "${sftp_user}" sftp \
     sh -c 'cd "$1" && shift && for n in "$@"; do mv -f ".$n.part" "$n"; done' sh "${inbound}" "${names[@]}"
+}
+
+seed_via_kubectl() {
+  require_cmd kubectl
+  [[ "$(kube get deployment sftp -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)" == 1 ]] ||
+    die "the sftp deployment in namespace ${REMIT_K8S_NAMESPACE} is not ready (scripts/k8s-up.sh)"
+  local inbound="/home/${sftp_user}/inbound" i
+  for i in "${!files[@]}"; do
+    # kubectl exec has no --user, so the file is written as root and then given to the SFTP user,
+    # the owner the compose transport produces, so intake-service can move it.
+    # shellcheck disable=SC2016 # $1 and $2 are expanded by the container's sh, not here
+    kube exec -i deployment/sftp -c sftp --       sh -c 'cat >"$1" && chown "$(id -u "$2"):$(id -g "$2")" "$1"' sh "${inbound}/.${names[i]}.part" "${sftp_user}"       <"${files[i]}"
+  done
+  # shellcheck disable=SC2016 # expanded by the container's sh, not here
+  kube exec deployment/sftp -c sftp --     sh -c 'cd "$1" && shift && for n in "$@"; do mv -f ".$n.part" "$n"; done' sh "${inbound}" "${names[@]}"
 }
 
 seed_via_sftp() {
