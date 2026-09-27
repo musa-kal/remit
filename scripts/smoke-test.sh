@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# End-to-end smoke test (spec 10.3). Brings up the compose stack, uploads the five sample files,
-# waits until the API has settled, and compares what the API reports with
-# docs/e2e-expectations.md. Then runs one dead-letter cycle with a FORCE_FAIL instruction.
-# Prints a PASS/FAIL table and exits non-zero on any mismatch. Needs bash, curl and jq (plus the
-# docker CLI for the compose steps).
+# End-to-end smoke test (spec 10.3). Brings up the compose stack (or uses the local Kubernetes
+# deployment), uploads the five sample files, waits until the API has settled, and compares what
+# the API reports with docs/e2e-expectations.md. Then runs one dead-letter cycle with a FORCE_FAIL
+# instruction. Prints a PASS/FAIL table and exits non-zero on any mismatch. Needs bash, curl and
+# jq, plus the docker CLI for compose or kubectl for k8s.
 set -euo pipefail
 
 # shellcheck source=lib.sh
@@ -11,22 +11,30 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF_USAGE'
-Usage: scripts/smoke-test.sh [-h] [--no-up] [--reset] [--keep] [--timeout SECONDS]
+Usage: scripts/smoke-test.sh [-h] [--target compose|k8s] [--no-up] [--reset] [--keep]
+                             [--timeout SECONDS]
 
 Steps:
-  1. scripts/deploy.sh compose (skipped with --no-up) and a check that the stack holds no batches
+  1. scripts/deploy.sh compose (skipped with --no-up or --target k8s) and a check that the stack
+     holds no batches
   2. scripts/seed-sftp.sh with every samples/*.csv
   3. poll GET /api/v1/stats/summary until the five files have settled
   4. assert the summary, every batch, the rejected rows, the duplicate instruction, account
-     masking, the audit trail, role checks and (compose only) where the files ended on SFTP
+     masking, the audit trail, role checks and where the files ended on SFTP
   5. dead-letter cycle: a one-row FORCE_FAIL file must become a PENDING dead letter; an admin
      replay answers 202, an immediate second replay 409, and the dead letter returns to PENDING
      with replayCount 1
-  6. docker compose down -v, unless --keep or --no-up
+  6. docker compose down -v, unless --keep, --no-up or --target k8s
 
 Options:
-  --no-up            use the running stack as it is (for example REMIT_API_URL pointing at k8s);
-                     it is never torn down
+  --target compose   (default) the docker compose stack
+  --target k8s       the local kind deployment of scripts/k8s-up.sh as it is (never deployed or
+                     torn down here): API at http://localhost:8080 (node port), samples uploaded
+                     and SFTP directories checked with kubectl exec (REMIT_SEED_VIA=kubectl).
+                     It needs empty databases: scripts/k8s-down.sh --keep-cluster, then
+                     scripts/k8s-up.sh, resets them
+  --no-up            use the running compose stack as it is (for example REMIT_API_URL pointing
+                     elsewhere); it is never torn down
   --reset            docker compose down -v first, so the run starts from empty volumes
   --keep             leave the stack running afterwards
   --timeout SECONDS  how long to wait for the samples to settle (default 180)
@@ -36,13 +44,16 @@ Environment (read from .env when not set):
   REMIT_API_URL            API base URL (default http://localhost:${REMIT_API_PORT:-8080})
   REMIT_OPERATOR_PASSWORD  password of the seeded operator user
   REMIT_ADMIN_PASSWORD     password of the seeded admin user
-  REMIT_SEED_VIA           seed-sftp.sh transport, compose (default) or sftp
+  REMIT_SEED_VIA           seed-sftp.sh transport: compose (default), kubectl (default for
+                           --target k8s) or sftp
+  REMIT_KUBE_CONTEXT       kubectl context for --target k8s (default kind-remit)
 
 The samples are only accepted once per stack (duplicate file detection), so the stack must be
 empty: start with --reset, or run scripts/deploy.sh compose on fresh volumes first.
 EOF_USAGE
 }
 
+target=compose
 up=true
 reset=false
 keep=false
@@ -52,6 +63,11 @@ while [[ $# -gt 0 ]]; do
     -h | --help)
       usage
       exit 0
+      ;;
+    --target)
+      [[ $# -ge 2 && ("$2" == compose || "$2" == k8s) ]] || die "--target needs compose or k8s"
+      target="$2"
+      shift
       ;;
     --no-up) up=false ;;
     --reset) reset=true ;;
@@ -71,6 +87,17 @@ done
 
 require_cmd curl jq
 load_env
+reset_hint="rerun with --reset"
+if [[ "${target}" == k8s ]]; then
+  require_cmd kubectl
+  [[ "${reset}" == false ]] ||
+    die "--reset is for compose; for k8s run scripts/k8s-down.sh --keep-cluster, then scripts/k8s-up.sh"
+  up=false
+  # The kind config publishes node port 30080 as localhost:8080.
+  export REMIT_API_URL="${REMIT_API_URL:-http://localhost:8080}"
+  export REMIT_SEED_VIA="${REMIT_SEED_VIA:-kubectl}"
+  reset_hint="reset it with scripts/k8s-down.sh --keep-cluster, then scripts/k8s-up.sh"
+fi
 API="${REMIT_API_URL:-http://localhost:${REMIT_API_PORT:-8080}}"
 API="${API%/}"
 [[ -n "${REMIT_OPERATOR_PASSWORD:-}" ]] || die "REMIT_OPERATOR_PASSWORD is not set (.env)"
@@ -206,14 +233,30 @@ seed() {
   "${REMIT_ROOT}/scripts/seed-sftp.sh" ${args[@]+"${args[@]}"} "$@"
 }
 
-compose_sftp_available() {
-  command -v docker >/dev/null 2>&1 && [[ "$(service_state sftp)" == "running healthy" ]]
+# sftp_available: whether the SFTP server of the target (compose container or k8s pod) is up.
+sftp_available() {
+  if [[ "${target}" == k8s ]]; then
+    [[ "$(kube get deployment sftp -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)" == 1 ]]
+  else
+    command -v docker >/dev/null 2>&1 && [[ "$(service_state sftp)" == "running healthy" ]]
+  fi
 }
 
-# sftp_listing <dir>: the file names in a directory of the compose sftp container, space separated.
+# sftp_sh <script> [arg...]: runs sh -c <script> with the arguments in the SFTP server.
+sftp_sh() {
+  local script="$1"
+  shift
+  if [[ "${target}" == k8s ]]; then
+    kube exec deployment/sftp -c sftp -- sh -c "${script}" sh "$@"
+  else
+    compose exec -T sftp sh -c "${script}" sh "$@"
+  fi
+}
+
+# sftp_listing <dir>: the file names in a directory of the SFTP server, space separated.
 sftp_listing() {
   # shellcheck disable=SC2016 # expanded by the container's sh, not here
-  compose exec -T sftp sh -c 'ls -1 "$1" | sort | tr "\n" " "' sh "$1"
+  sftp_sh 'ls -1 "$1" | sort | tr "\n" " "' "$1"
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -236,10 +279,10 @@ ADMIN_TOKEN="$(login admin "${REMIT_ADMIN_PASSWORD}")"
 summary="$(get /api/v1/stats/summary "${OPERATOR_TOKEN}")"
 existing="$(jq '[.batches[]] | add' <<<"${summary}")"
 [[ "${existing}" == 0 ]] ||
-  die "the stack already holds ${existing} batches; the samples need an empty stack (rerun with --reset)"
+  die "the stack already holds ${existing} batches; the samples need an empty stack (${reset_hint})"
 # Files seeded a moment ago are not batches yet; they would turn the samples into duplicates.
-if compose_sftp_available && [[ -n "$(sftp_listing "/home/${REMIT_SFTP_USER:-remit}/inbound")" ]]; then
-  die "SFTP /inbound already holds files waiting for the poller; rerun with --reset"
+if sftp_available && [[ -n "$(sftp_listing "/home/${REMIT_SFTP_USER:-remit}/inbound")" ]]; then
+  die "SFTP /inbound already holds files waiting for the poller; ${reset_hint}"
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -385,8 +428,8 @@ check "GET /audit-events as operator" 403 "${HTTP_STATUS}"
 http POST /api/v1/dead-letters/1/replay "${OPERATOR_TOKEN}"
 check "POST /dead-letters/1/replay as operator" 403 "${HTTP_STATUS}"
 
-# Where the files ended on the SFTP server (compose only).
-if compose_sftp_available; then
+# Where the files ended on the SFTP server.
+if sftp_available; then
   home="/home/${REMIT_SFTP_USER:-remit}"
   check "sftp /processed" \
     "PAY_ACME01_20261015093000.csv PAY_ACME01_20261015100000.csv PAY_BETA02_20261015130000.csv " \
@@ -396,19 +439,21 @@ if compose_sftp_available; then
     "$(sftp_listing "${home}/error")"
   check "sftp /inbound and /processing empty" "|" "$(sftp_listing "${home}/inbound")|$(sftp_listing "${home}/processing")"
   # shellcheck disable=SC2016 # expanded by the container's sh, not here
-  reasons="$(compose exec -T sftp sh -c 'head -n 1 "$1"; head -n 1 "$2"' sh \
+  reasons="$(sftp_sh 'head -n 1 "$1"; head -n 1 "$2"' \
     "${home}/error/PAY_ACME01_20261015110000.csv.error.txt" \
     "${home}/error/PAY_BETA02_20261015120000.csv.error.txt" | tr -d '\r' | tr '\n' ' ')"
   check "sftp .error.txt reason codes" "DUPLICATE_FILE CONTROL_TOTAL_MISMATCH " "${reasons}"
 else
-  log_warn "compose sftp service not reachable; skipping the SFTP directory checks"
+  log_warn "SFTP server of the ${target} target not reachable; skipping the SFTP directory checks"
 fi
 
 # ---------------------------------------------------------------------------------------------
-# 5. Dead-letter cycle with the chaos hook (FORCE_FAIL, on in the docker profile)
+# 5. Dead-letter cycle with the chaos hook (FORCE_FAIL: on in the docker profile and in the
+#    local Kubernetes overlay's remit-config)
 # ---------------------------------------------------------------------------------------------
 
-# Compose pins the business date to 2026-10-15 unless .env says otherwise (ADR 0005).
+# Compose and the local overlay pin the business date to 2026-10-15 unless .env says otherwise
+# (ADR 0005).
 export REMIT_CLOCK_FIXED_DATE="${REMIT_CLOCK_FIXED_DATE-2026-10-15}"
 chaos_file="$("${REMIT_ROOT}/scripts/gen-batch.sh" -o "${work}" -r FORCE_FAIL CHAOS01 1)"
 chaos_ref="$(sed -n '2p' "${chaos_file}" | cut -d, -f1)"
