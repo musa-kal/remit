@@ -64,10 +64,14 @@ spec:
           # sshd refuses to chroot below a directory that others can write to, and a fresh volume
           # is world-writable, so /home is fixed first. The image's user setup prints the user
           # spec (with the password) to stdout, so stdout is dropped; sshd logs to stderr (-e).
+          # kind's containerd sets the open files limit to about a billion, and every SFTP
+          # session then spins closing that many descriptors before it starts (Docker uses about
+          # a million), so the limit is lowered first.
           command:
             - sh
             - -c
             - |
+              ulimit -n 65536
               chown root:root /home && chmod 755 /home
               exec /entrypoint >/dev/null
           env:
