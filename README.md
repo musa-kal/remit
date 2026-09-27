@@ -390,6 +390,49 @@ newman run postman/remit.postman_collection.json -e postman/docker.postman_envir
 
 To use it in the Postman app: Import the collection and [postman/local.postman_environment.json](postman/local.postman_environment.json), select the environment, fill in `operatorPassword` and `adminPassword` (current value only, so they stay out of anything you export), and run the collection with the Runner in folder order; later folders use ids that earlier ones discover. The collection pre-request script logs in as both users with `pm.sendRequest` whenever a token is missing or older than 10 minutes. It never retries a refused login (five failures lock a username for 10 minutes); after fixing a wrong password, clear the collection variable `loginBlockedUntil`.
 
+## CI
+
+Jenkins is the primary pipeline. It runs locally from [ci/docker-compose.jenkins.yml](ci/docker-compose.jenkins.yml) together with SonarQube Community Build, and [ci/README.md](ci/README.md) has the full setup, credentials and troubleshooting. The [GitHub Actions workflow](.github/workflows/ci.yml) behind the badge above repeats only the static checks and `./mvnw -B verify`.
+
+```bash
+ci/setup.sh    # SonarQube (admin password, quality gate, webhook, token), then Jenkins configured as code
+# open http://localhost:8090/job/remit/ and click Build Now (logins are in ci/.env)
+docker compose -f ci/docker-compose.jenkins.yml down      # stop; add -v to delete Jenkins, SonarQube and cache volumes
+```
+
+The [Jenkinsfile](Jenkinsfile) stages, with their durations in the green run shown below (build #5, warm Maven and image caches):
+
+| # | Stage | What it runs | Time |
+|---|---|---|---|
+| 1 | Checkout | `checkout scm` of `main` | 1 s |
+| 2 | Static checks | `./mvnw -B spotless:check`, `shellcheck scripts/*.sh ci/*.sh` | 4 s |
+| 3 | Build and test | `./mvnw -B verify`: 631 unit and Testcontainers integration tests, Spotless, JaCoCo gate; publishes JUnit and JaCoCo | 3 min 23 s |
+| 4 | SonarQube analysis | `withSonarQubeEnv('sonarqube') { ./mvnw -B sonar:sonar }` | 20 s |
+| 5 | Quality gate | `waitForQualityGate abortPipeline: true` within 5 minutes | 4 s |
+| 6 | Docker build | `scripts/build.sh --skip-tests`: three images, all layers cached because no Java or pom changed (8 min 41 s on an empty cache) | 4 s |
+| 7 | E2E | `.env` from credentials, `scripts/deploy.sh compose`, `scripts/smoke-test.sh --no-up` (70 checks) | 1 min 12 s |
+| 8 | API tests | `scripts/newman.sh -e docker --base-url http://dind:8080/api/v1`: 98 requests, 687 assertions; JUnit and htmlextra reports | 14 s |
+| | post | compose logs, `docker compose down -v`, archive reports | 4 s |
+| | total | | 5 min 29 s |
+
+Details:
+
+- Jenkins does not use the host's Docker socket: a `docker:28-dind` sidecar is the daemon for Testcontainers, the image builds and the compose stack, and the Jenkins home volume is mounted into both at the same path so compose bind mounts of workspace files resolve ([ADR 0012](docs/decisions/0012-ci-docker-strategy.md)).
+- E2E runs before the API tests (the spec lists them the other way round) because the Postman collection asserts the state the smoke test leaves behind; the stack is deployed once and removed with `docker compose down -v` in `post`.
+- The secrets of the deployed stack are Jenkins credentials (`remit-*`), bound with `credentials()` and written to the workspace `.env` without tracing; SonarQube uses the credential `sonar-token` and calls Jenkins back through the webhook `jenkins`.
+- Quality gate `remit`: Sonar way plus coverage of at least 80%, no blocker, critical or vulnerability issues and less than 3% duplicated lines, each on new code and on overall code (on a first analysis SonarQube has no new code, so the overall conditions keep the gate meaningful). The first analysis found 1 blocker and 7 critical issues (one of them the only vulnerability) plus 1 minor bug; they were fixed in the code (the CSRF finding is a reviewed exemption for a stateless bearer-token API, documented in `SecurityConfig` and [ADR 0004](docs/decisions/0004-jwt-approach.md)).
+- Reports on each build: JUnit results (1,292 cases: 631 from surefire and failsafe, 661 from Newman), JaCoCo coverage, the Newman htmlextra report, and the compose logs as artifacts.
+
+SonarQube after that run: quality gate **Passed**, coverage 96.8% (lines 98.1%, branches 91.6%) on 7.7k lines of code, 0 bugs, 0 vulnerabilities, 0 security hotspots, 116 code smells (none blocker or critical; maintainability, reliability and security ratings A), 1.2% duplicated lines.
+
+![Jenkins stage view of the green pipeline](docs/img/jenkins-pipeline-green.png)
+
+![Jenkins test results of the green run](docs/img/jenkins-tests.png)
+
+![SonarQube project overview with the passed quality gate](docs/img/sonarqube-dashboard.png)
+
+![SonarQube quality gate remit and its conditions](docs/img/sonarqube-quality-gate.png)
+
 ## Measured performance
 
 NFR-05 asks that a 10,000-row valid file goes from the SFTP drop to all instructions `ROUTED` in under 60 s on a local compose stack. Measured with `scripts/perf-test.sh --runs 3`: it generates a 10,000-row file with `gen-batch.sh`, takes the start time right before uploading it to `/inbound`, and stops when `GET /api/v1/batches/{id}` reports `ROUTED + REQUIRES_REVIEW = 10000` (polled every 0.5 s). The figure therefore includes the wait for the next SFTP poll, the intake job, routing, and api-service catching up with the status events.
