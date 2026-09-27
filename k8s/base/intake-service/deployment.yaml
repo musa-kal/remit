@@ -1,0 +1,141 @@
+# intake-service: polls SFTP /inbound and runs the Spring Batch ingestion job (spec section 4).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intake-service
+  labels:
+    app.kubernetes.io/name: intake-service
+    app.kubernetes.io/component: intake
+spec:
+  # One poller. Recreate (not a rolling update) so two pods never poll /inbound at the same time
+  # and a job is never split across an old and a new pod.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: intake-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: intake-service
+        app.kubernetes.io/component: intake
+    spec:
+      automountServiceAccountToken: false
+      # Service links would add variables such as KAFKA_PORT=tcp://... to the environment.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Waits until MySQL, Kafka and SFTP accept connections, so the service does not crash-loop
+        # while the infrastructure starts. A Service only routes to ready pods, so this also waits
+        # for their readiness probes. Uses the service image (bash), no extra image to pull.
+        - name: wait-for-dependencies
+          image: remit/intake-service:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              for dep in mysql:3306 kafka:9092 sftp:22; do
+                until timeout 2 bash -c "exec 3<>/dev/tcp/${dep%:*}/${dep#*:}" 2>/dev/null; do
+                  echo "waiting for ${dep}"
+                  sleep 2
+                done
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: intake-service
+          image: remit/intake-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: remit-config
+          env:
+            - name: REMIT_STAGING_DIR
+              value: /staging
+            - name: REMIT_INTAKE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_INTAKE_DB_PASSWORD
+            - name: REMIT_SFTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_SFTP_USER
+            - name: REMIT_SFTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_SFTP_PASSWORD
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          # Spring Boot needs 20 to 60 s to start on one CPU; liveness and readiness only begin
+          # once the startup probe has passed (up to 20 + 36 x 5 = 200 s).
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 36
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Files are staged here while their job runs (FR-INT-02). A failed job's staged copy is
+            # lost with the pod; the runbook's "drop the file again" restart downloads it again.
+            - name: staging
+              mountPath: /staging
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: staging
+          emptyDir:
+            sizeLimit: 1Gi

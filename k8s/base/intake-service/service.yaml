@@ -1,0 +1,15 @@
+# Cluster-internal address of the intake-service actuator (health, info, metrics, ingestjobs).
+apiVersion: v1
+kind: Service
+metadata:
+  name: intake-service
+  labels:
+    app.kubernetes.io/name: intake-service
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: intake-service
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
