@@ -1,0 +1,126 @@
+# SFTP drop zone (atmoz/sftp) for the local overlay. Clients upload to /inbound; intake-service
+# moves files through /processing to /processed or /error. Password auth, chrooted to the user's
+# home, user and password from remit-secrets. The files live on a small volume so a pod restart
+# keeps them (a job restart needs its file in /processing, see docs/runbook.md).
+apiVersion: v1
+kind: Service
+metadata:
+  name: sftp
+  labels:
+    app.kubernetes.io/name: sftp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: sftp
+  ports:
+    - name: ssh
+      port: 22
+      targetPort: ssh
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sftp-data
+  labels:
+    app.kubernetes.io/name: sftp
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sftp
+  labels:
+    app.kubernetes.io/name: sftp
+    app.kubernetes.io/component: file-drop
+spec:
+  replicas: 1
+  # The volume is ReadWriteOnce: stop the old pod before the new one mounts it.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sftp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sftp
+        app.kubernetes.io/component: file-drop
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # sshd must start as root to chroot each user (the one pod outside the "restricted"
+      # Pod Security Standard, see the namespace). It keeps the default capabilities.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sftp
+          image: atmoz/sftp:alpine
+          imagePullPolicy: IfNotPresent
+          # sshd refuses to chroot below a directory that others can write to, and a fresh volume
+          # is world-writable, so /home is fixed first. The image's user setup prints the user
+          # spec (with the password) to stdout, so stdout is dropped; sshd logs to stderr (-e).
+          command:
+            - sh
+            - -c
+            - |
+              chown root:root /home && chmod 755 /home
+              exec /entrypoint >/dev/null
+          env:
+            - name: REMIT_SFTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_SFTP_USER
+            - name: REMIT_SFTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_SFTP_PASSWORD
+            # user:password:uid:gid:dirs, the same spec as compose. Kubernetes expands $(VAR)
+            # from the two variables above.
+            - name: SFTP_USERS
+              value: $(REMIT_SFTP_USER):$(REMIT_SFTP_PASSWORD):1001:1001:inbound,processing,processed,error
+          ports:
+            - name: ssh
+              containerPort: 22
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          # Ready once the user's directories exist and sshd listens on port 22 (0x0016). Reads
+          # /proc/net/tcp instead of connecting, which would log a preauth disconnect every time.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -d "/home/$REMIT_SFTP_USER/error" && grep -qE ':0016 [0-9A-F]{8}:0000 0A' /proc/net/tcp
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - grep -qE ':0016 [0-9A-F]{8}:0000 0A' /proc/net/tcp
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: home
+              mountPath: /home
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: sftp-data
