@@ -1,0 +1,67 @@
+# One-shot Job: waits for the broker, then runs docker/kafka/create-topics.sh (the same script as
+# the compose kafka-init service) to create the eight payments.* topics with 3 partitions.
+# The script uses --if-not-exists, so scripts/k8s-up.sh deletes and reruns the Job on every run.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  labels:
+    app.kubernetes.io/name: kafka-init
+    app.kubernetes.io/component: broker-setup
+spec:
+  backoffLimit: 4
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-init
+        app.kubernetes.io/component: broker-setup
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: create-topics
+          image: apache/kafka:3.9.2
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              until /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server "${KAFKA_BOOTSTRAP}" >/dev/null 2>&1; do
+                echo "waiting for ${KAFKA_BOOTSTRAP}"
+                sleep 3
+              done
+              exec bash /opt/remit/create-topics.sh
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: kafka:9092
+            - name: TOPIC_PARTITIONS
+              value: "3"
+            - name: TOPIC_REPLICATION_FACTOR
+              value: "1"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/remit
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: kafka-topics
