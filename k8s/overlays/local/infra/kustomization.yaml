@@ -1,0 +1,31 @@
+# Infrastructure for the local kind cluster: MySQL, MongoDB, Kafka (with its topic Job) and SFTP,
+# one replica each on small volumes from kind's default StorageClass. No operators.
+#
+# The init scripts are the ones docker compose mounts (docker/), turned into ConfigMaps here so
+# there is one copy of each. They live outside this directory, so the overlay is rendered with
+#   kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/overlays/local
+# (scripts/k8s-up.sh does this); a plain kubectl apply -k refuses files outside the root.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: remit
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: remit
+    includeTemplates: true
+resources:
+  - mysql.yaml
+  - mongo.yaml
+  - kafka.yaml
+  - kafka-init.yaml
+  - sftp.yaml
+configMapGenerator:
+  - name: mysql-init
+    files:
+      - 01-init.sql=../../../../docker/mysql/init.sql
+      - 02-init-users.sh=../../../../docker/mysql/init-users.sh
+  - name: mongo-init
+    files:
+      - 01-init.js=../../../../docker/mongo/init.js
+  - name: kafka-topics
+    files:
+      - create-topics.sh=../../../../docker/kafka/create-topics.sh
