@@ -1,0 +1,22 @@
+# Non-secret settings shared by the three services (envFrom). Host names and ports come from the
+# k8s profile of each application.yml (mysql:3306, mongo:27017, kafka:9092, sftp:22); secrets come
+# from the remit-secrets Secret (see secret.example.yaml and scripts/k8s-secrets.sh).
+# Pods read these values at startup only: after a change, run
+#   kubectl -n remit rollout restart deployment
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: remit-config
+data:
+  SPRING_PROFILES_ACTIVE: k8s
+  # Keeps container logs pure JSON (scripts/logs.sh pretty-prints them with jq).
+  SPRING_MAIN_BANNER_MODE: "off"
+  # intake-service: how often /inbound is polled (FR-INT-01 default).
+  REMIT_SFTP_POLL_INTERVAL: 30s
+  # intake-service: empty means the real business date (ADR 0005).
+  REMIT_CLOCK_FIXED_DATE: ""
+  # routing-service: the FORCE_FAIL chaos hook (FR-RTE-04) stays off outside local demos.
+  # Spring's environment variable form of remit.routing.chaos-enabled.
+  REMIT_ROUTING_CHAOSENABLED: "false"
+  # api-service: operator and admin are seeded only where an overlay turns this on.
+  REMIT_SEED_USERS_ENABLED: "false"
