@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Shared helpers for the scripts in this directory. Source it, do not run it:
 #   . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# Provides the repository root, .env loading, logging, a docker compose wrapper and health waits.
+# Provides the repository root, .env loading, logging, docker compose and kubectl wrappers and
+# health waits.
 set -euo pipefail
 
 usage() {
@@ -9,7 +10,7 @@ usage() {
 Usage: . scripts/lib.sh
 
 Library of helpers for the other scripts (repository root, .env loading, logging,
-docker compose wrapper, waiting for healthy services). It does nothing when run.
+docker compose and kubectl wrappers, waiting for healthy services). It does nothing when run.
 EOF_USAGE
 }
 
@@ -75,6 +76,23 @@ load_env() {
 # repository root instead of taking -f <host path>.
 compose() {
   (cd "${REMIT_ROOT}" && MSYS_NO_PATHCONV=1 docker compose "$@")
+}
+
+# Kubernetes: the local kind cluster and the namespace of the stack (k8s/).
+# shellcheck disable=SC2034 # used by the scripts that source this file
+REMIT_KIND_CLUSTER=remit
+REMIT_K8S_NAMESPACE=remit
+
+# kube <args>: kubectl in the remit namespace of the kind cluster's context (kind-remit).
+# REMIT_KUBE_CONTEXT selects another context; set it empty to use the current one. Like compose,
+# it turns off Git Bash path conversion because the arguments hold container paths.
+kube() {
+  local context="${REMIT_KUBE_CONTEXT-kind-${REMIT_KIND_CLUSTER}}"
+  local args=(--namespace "${REMIT_K8S_NAMESPACE}")
+  if [[ -n "${context}" ]]; then
+    args=(--context "${context}" "${args[@]}")
+  fi
+  MSYS_NO_PATHCONV=1 kubectl "${args[@]}" "$@"
 }
 
 # service_state <service>: prints "<state> <health>" of the compose service's container
