@@ -1,0 +1,15 @@
+# Local demo settings, merged into the base remit-config ConfigMap. They match docker compose so
+# the committed samples, the smoke test and the Postman collection behave the same on kind.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: remit-config
+data:
+  # Poll /inbound every 10 s instead of 30 s (ADR 0011).
+  REMIT_SFTP_POLL_INTERVAL: 10s
+  # Pins the business date so the committed samples always validate (ADR 0005).
+  REMIT_CLOCK_FIXED_DATE: "2026-10-15"
+  # FORCE_FAIL chaos hook on, for the smoke test's dead-letter and replay cycle (FR-RTE-04).
+  REMIT_ROUTING_CHAOSENABLED: "true"
+  # Seeds operator and admin with the passwords from remit-secrets.
+  REMIT_SEED_USERS_ENABLED: "true"
