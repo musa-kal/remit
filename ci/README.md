@@ -48,7 +48,7 @@ Logins:
 
 ## Run the pipeline
 
-Commit first: the job builds what is committed on `main`. The repository is bind mounted read only at `/repo` in the Jenkins container and the job clones `file:///repo` (a real deployment would use `https://github.com/Musa-Kal/remit.git` with a credential). Then open <http://localhost:8090/job/remit/> and click **Build Now**. The first green run took 16 minutes, most of it `./mvnw verify` (4.4 minutes) and the three image builds (8.7 minutes, which download the Maven dependencies into the dind build cache once); see the README for the stage timings.
+Commit first: the job builds what is committed on `main`. The repository is bind mounted read only at `/repo` in the Jenkins container and the job clones `file:///repo` (a real deployment would use `https://github.com/Musa-Kal/remit.git` with a credential). Then open <http://localhost:8090/job/remit/> and click **Build Now**. The first green run took 16 minutes, most of it `./mvnw verify` (4.4 minutes) and the three image builds (8.7 minutes, which download the Maven dependencies into the dind build cache once). With warm caches and no Java or pom change a run takes about 5.5 minutes; the README lists the stage timings.
 
 From a shell (`JENKINS_ADMIN_PASSWORD` from `ci/.env`):
 
@@ -131,6 +131,7 @@ After `down -v`, delete `ci/.env` as well (its SonarQube token and admin passwor
 
 ## Troubleshooting
 
+- The very first build is slow: dind starts with an empty image store, so the Testcontainers images (MySQL, Kafka, MongoDB, SFTP) are pulled during "Build and test", which took 30 minutes on the verification machine against under 4 minutes afterwards.
 - `ci/setup.sh` cannot log in to SonarQube: the SonarQube volume was kept but `ci/.env` was recreated. Remove the volumes (`down -v`) or restore the old `SONAR_ADMIN_PASSWORD`.
 - Quality gate stage waits until the timeout: check the webhook delivery under SonarQube **Administration > Configuration > Webhooks**.
 - Plugin changes: edit `ci/plugins.txt` and rerun `ci/setup.sh` (it rebuilds the image).
