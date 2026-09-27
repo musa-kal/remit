@@ -466,6 +466,6 @@ Also tried without a measurable gain: turning off the MySQL binary log. Delibera
 - [x] M4 API + security + audit: REST endpoints, JWT and roles, MongoDB audit trail, DLT replay
 - [x] M5 Containers + E2E: Dockerfiles, full compose stack, smoke test, measured throughput
 - [x] M6 Postman: collection and environments, Newman run
-- [ ] M7 CI: Jenkins and SonarQube, quality gate
+- [x] M7 CI: Jenkins and SonarQube, quality gate
 - [ ] M8 Kubernetes + scripts: kustomize base and local overlay, ops scripts
 - [ ] M9 Docs: runbook, architecture notes, ADRs
