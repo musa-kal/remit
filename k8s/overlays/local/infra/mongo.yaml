@@ -1,0 +1,141 @@
+# MongoDB 7 for the local overlay: one pod, one small volume. On the first start the image runs
+# docker/mongo/init.js from the mongo-init ConfigMap: the remit_audit database, the append-only
+# application user and the audit_events indexes, exactly as in docker compose.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  labels:
+    app.kubernetes.io/name: mongo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mongo
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: mongo
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+  labels:
+    app.kubernetes.io/name: mongo
+    app.kubernetes.io/component: audit-store
+spec:
+  serviceName: mongo
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mongo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mongo
+        app.kubernetes.io/component: audit-store
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The image's mongodb user; the entrypoint skips its root-only steps when started as it.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mongo
+          image: mongo:7.0
+          imagePullPolicy: IfNotPresent
+          # WiredTiger would otherwise size its cache from the node's memory, not the pod limit.
+          args: ["--wiredTigerCacheSizeGB", "0.25"]
+          ports:
+            - name: mongo
+              containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: MONGO_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: MONGO_ROOT_PASSWORD
+            # Read by init.js on the first start.
+            - name: REMIT_MONGO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_MONGO_USER
+            - name: REMIT_MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: remit-secrets
+                  key: REMIT_MONGO_PASSWORD
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          # Ready once the real server is up (the temporary init server listens on 127.0.0.1
+          # only, so connecting via the pod's host name fails until then) and the four
+          # audit_events indexes that init.js creates (_id plus three) exist.
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - >-
+                  mongosh --quiet --host "$(hostname)"
+                  -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
+                  --eval 'quit(db.getSiblingDB("remit_audit").audit_events.getIndexes().length === 4 ? 0 : 1)'
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - >-
+                  mongosh --quiet --host "$(hostname)"
+                  -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
+                  --eval 'quit(db.getSiblingDB("remit_audit").audit_events.getIndexes().length === 4 ? 0 : 1)'
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: mongo
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: init
+          configMap:
+            name: mongo-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
