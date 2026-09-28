@@ -45,9 +45,33 @@ routing-service keeps an idempotency ledger in MySQL, `remit_routing.processed_i
 
 The third row is the classic dual-write gap: a Kafka publish and a MySQL commit cannot be atomic without a transactional outbox. It is accepted because routed topics are keyed by `idempotencyKey`, so the repeat lands on the same partition with the same key, and a downstream consumer must deduplicate by that key. Stretch item S4 (transactional outbox) would remove the gap.
 
+### The crash between the routed publish and the status update
+
+This is the one case where a crash produces a visible duplicate, so in detail:
+
+1. Delivery 1 claims the key (row `ROUTING`, `attempts = 1`) and publishes the instruction to `payments.routed.eft`; the broker acknowledges.
+2. routing-service dies before transaction 2 commits. The row stays `ROUTING`, no status event is sent, and the offset of the input record is not committed.
+3. After the restart (or on another replica after the rebalance) the same record is delivered again. The insert fails on the primary key, the existing row is `ROUTING`, so `attempts` becomes 2 and the algorithm continues.
+4. The instruction is published to `payments.routed.eft` a second time, the row becomes `ROUTED`, and one `ROUTED` status event is sent.
+
+Result: the ledger and the status events are correct (one `ROUTED`), but the channel topic holds the instruction twice, with the same key and therefore on the same partition. api-service's read model is not affected because it upserts routed records by idempotency key; any other consumer of a routed topic must do the same. The window is short (one MySQL commit after an acknowledged send) but it exists, and nothing in Kafka or MySQL alone can close it.
+
 The fourth row is why the `DUPLICATE` event carries the existing status in `detail`: api-service can set the instruction's status from it when it never saw the `ROUTED` event.
 
 Ordering keeps the ledger honest: the ledger never says `ROUTED` for an instruction that was not published, because step 4 runs only after the broker acknowledged the routed record.
+
+## What "exactly once" means here
+
+The README says routing-service routes each instruction "exactly once in effect". Precisely:
+
+| Guaranteed | Not guaranteed |
+|---|---|
+| The ledger reaches `ROUTED` or `REQUIRES_REVIEW` at most once per idempotency key, however often the instruction is delivered, replayed or resent by the client | That the routed record appears exactly once on its channel topic: a crash between the acknowledged publish and the ledger commit duplicates it (above) |
+| Every delivery after the instruction is final is answered with a `DUPLICATE` status event and is not routed again | That the `ROUTED` status event is sent: a crash right after the ledger commit loses it, and the next delivery reports `DUPLICATE` with detail `already ROUTED` instead |
+| An instruction is never marked routed without an acknowledged routed record | That status events are sent exactly once: a crash after them but before the offset commit makes the next delivery add a `DUPLICATE` |
+| No input record is lost: offsets are committed only after the listener returns, and failures go to the DLT | Ordering across different debtors, or across partitions |
+
+Kafka's own exactly-once semantics (idempotent producer plus transactions with `read_committed` consumers) would make "consume, publish routed record, commit offset" atomic, which would remove the duplicate routed record for the redelivery case. It would still not cover the MySQL ledger write in the same atomic step, nor recognize the same instruction arriving as two different records (a resent file, a replay), which is the more common source of duplicates here. The ledger handles those; a transactional outbox (stretch item S4) would be the way to make the routed publish and the ledger update atomic as well.
 
 ## Consequences
 
