@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Tails the JSON logs of a compose service and pretty-prints them with jq. Lines that are not
-# JSON (for example a JVM warning on stderr) are printed as they are.
+# Tails the JSON logs of a compose service or of the pods of a Kubernetes deployment and
+# pretty-prints them with jq. Lines that are not JSON (for example a JVM warning on stderr) are
+# printed as they are.
 set -euo pipefail
 
 # shellcheck source=lib.sh
@@ -8,10 +9,14 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF_USAGE'
-Usage: scripts/logs.sh [-h] [-n LINES] [--no-follow] [-c] <service>
+Usage: scripts/logs.sh [-h] [-n LINES] [--no-follow] [-c] <service> [compose|k8s]
 
-Follows docker compose logs of <service> (intake-service, routing-service, api-service, or any
-other compose service) and pretty-prints every JSON line with jq.
+Follows the logs of <service> (intake-service, routing-service, api-service, or an
+infrastructure service such as kafka) and pretty-prints every JSON line with jq.
+
+  compose (default)  docker compose logs <service>
+  k8s                kubectl logs of every pod labelled app.kubernetes.io/name=<service> in
+                     namespace remit (both routing-service replicas, interleaved)
 
 Options:
   -n LINES     number of existing lines to show first (default 50, "all" for everything)
@@ -19,17 +24,21 @@ Options:
   -c           one compact JSON object per line instead of indented output
   -h, --help   show this help
 
+Environment:
+  REMIT_KUBE_CONTEXT  kubectl context for k8s (default kind-remit; empty for the current one)
+
 Examples:
   scripts/logs.sh intake-service
   scripts/logs.sh -n all --no-follow routing-service | less
   scripts/logs.sh -c api-service | grep correlationId
+  scripts/logs.sh routing-service k8s
 EOF_USAGE
 }
 
 tail_lines=50
 follow=true
 compact=false
-service=""
+positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h | --help)
@@ -44,28 +53,40 @@ while [[ $# -gt 0 ]]; do
     --no-follow) follow=false ;;
     -c) compact=true ;;
     -*) die "unknown option $1 (see --help)" ;;
-    *)
-      [[ -z "${service}" ]] || die "only one service, got '${service}' and '$1'"
-      service="$1"
-      ;;
+    *) positional+=("$1") ;;
   esac
   shift
 done
-[[ -n "${service}" ]] || {
+[[ ${#positional[@]} -ge 1 && ${#positional[@]} -le 2 ]] || {
   usage >&2
   exit 1
 }
+service="${positional[0]}"
+target="${positional[1]:-compose}"
+[[ "${target}" == compose || "${target}" == k8s ]] || die "target must be compose or k8s, got '${target}'"
 [[ "${tail_lines}" == all || "${tail_lines}" =~ ^[0-9]+$ ]] || die "-n must be a number or all"
 
-require_cmd docker jq
-
-args=(logs --no-log-prefix --tail "${tail_lines}")
-if [[ "${follow}" == true ]]; then
-  args+=(-f)
-fi
 jq_args=(--unbuffered -R -r)
 if [[ "${compact}" == true ]]; then
   jq_args+=(-c)
 fi
 
-compose "${args[@]}" "${service}" 2>&1 | jq "${jq_args[@]}" 'fromjson? // .'
+if [[ "${target}" == k8s ]]; then
+  require_cmd kubectl jq
+  # kubectl uses -1 for all lines.
+  args=(logs --selector "app.kubernetes.io/name=${service}" --tail "${tail_lines/all/-1}"
+    --prefix=false --max-log-requests 10)
+  if [[ "${follow}" == true ]]; then
+    args+=(-f)
+  fi
+  [[ -n "$(kube get pods --selector "app.kubernetes.io/name=${service}" -o name 2>/dev/null)" ]] ||
+    die "no pods labelled app.kubernetes.io/name=${service} in namespace ${REMIT_K8S_NAMESPACE}"
+  kube "${args[@]}" 2>&1 | jq "${jq_args[@]}" 'fromjson? // .'
+else
+  require_cmd docker jq
+  args=(logs --no-log-prefix --tail "${tail_lines}")
+  if [[ "${follow}" == true ]]; then
+    args+=(-f)
+  fi
+  compose "${args[@]}" "${service}" 2>&1 | jq "${jq_args[@]}" 'fromjson? // .'
+fi
