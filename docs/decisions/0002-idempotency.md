@@ -54,7 +54,7 @@ This is the one case where a crash produces a visible duplicate, so in detail:
 3. After the restart (or on another replica after the rebalance) the same record is delivered again. The insert fails on the primary key, the existing row is `ROUTING`, so `attempts` becomes 2 and the algorithm continues.
 4. The instruction is published to `payments.routed.eft` a second time, the row becomes `ROUTED`, and one `ROUTED` status event is sent.
 
-Result: the ledger and the status events are correct (one `ROUTED`), but the channel topic holds the instruction twice, with the same key and therefore on the same partition. api-service's read model is not affected because it upserts routed records by idempotency key; any other consumer of a routed topic must do the same. The window is short (one MySQL commit after an acknowledged send) but it exists, and nothing in Kafka or MySQL alone can close it.
+Result: the ledger and the status events are correct (one `ROUTED`), but the channel topic holds the instruction twice, with the same key and therefore on the same partition. api-service's read model is not affected because it upserts routed records by idempotency key (its audit trail does show both copies, each with its own `eventId`); any other consumer of a routed topic must do the same. The window is short (one MySQL commit after an acknowledged send) but it exists, and nothing in Kafka or MySQL alone can close it.
 
 The fourth row is why the `DUPLICATE` event carries the existing status in `detail`: api-service can set the instruction's status from it when it never saw the `ROUTED` event.
 
