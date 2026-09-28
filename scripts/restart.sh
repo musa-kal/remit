@@ -13,7 +13,8 @@ Restarts <service> and waits for it to be healthy.
 
   compose (default)  docker compose restart <service>, then wait for its healthcheck
   k8s                kubectl rollout restart deployment/<service> -n remit, then
-                     kubectl rollout status (waits for the new pods to be ready)
+                     kubectl rollout status (waits for the new pods to be ready); uses the
+                     kind-remit context unless REMIT_KUBE_CONTEXT says otherwise
 
 <service> is intake-service, routing-service or api-service; in compose any service of the
 stack (mysql, kafka, ...) can be restarted as well.
@@ -74,10 +75,14 @@ restart_k8s() {
     [[ "${svc}" == "${service}" ]] && found=true
   done
   [[ "${found}" == true ]] || die "k8s restarts are for ${REMIT_APP_SERVICES[*]}, not '${service}'"
-  log_info "kubectl rollout restart deployment/${service} -n remit"
-  kubectl rollout restart "deployment/${service}" -n remit
-  kubectl rollout status "deployment/${service}" -n remit --timeout "${timeout}s"
-  log_ok "${service} rolled out"
+  local start
+  start="$(date +%s)"
+  log_info "kubectl rollout restart deployment/${service} -n ${REMIT_K8S_NAMESPACE}"
+  kube rollout restart "deployment/${service}"
+  kube rollout status "deployment/${service}" --timeout "${timeout}s" ||
+    die "${service} did not become ready; see: kubectl -n ${REMIT_K8S_NAMESPACE} describe deployment/${service}"
+  kube get pods --selector "app.kubernetes.io/name=${service}" >&2
+  log_ok "${service} rolled out and ready after $(($(date +%s) - start))s"
 }
 
 case "${target}" in
