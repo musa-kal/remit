@@ -41,6 +41,12 @@ jobs:
       - name: Static checks (ShellCheck)
         run: shellcheck --version && shellcheck scripts/*.sh ci/*.sh
 
+      # The runner image ships kubectl; rendering catches broken kustomizations and patches.
+      - name: Static checks (Kubernetes manifests render)
+        run: |
+          kubectl kustomize k8s/base >/dev/null
+          kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/overlays/local >/dev/null
+
       # Testcontainers uses the runner's Docker daemon.
       - name: Build and test
         run: ./mvnw -B verify
