@@ -19,6 +19,9 @@ spec:
       app.kubernetes.io/name: routing-service
   template:
     metadata:
+      annotations:
+        # kubectl logs and exec pick the service, not the init container.
+        kubectl.kubernetes.io/default-container: routing-service
       labels:
         app.kubernetes.io/name: routing-service
         app.kubernetes.io/component: routing

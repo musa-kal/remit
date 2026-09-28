@@ -17,6 +17,9 @@ spec:
       app.kubernetes.io/name: intake-service
   template:
     metadata:
+      annotations:
+        # kubectl logs and exec pick the service, not the init container.
+        kubectl.kubernetes.io/default-container: intake-service
       labels:
         app.kubernetes.io/name: intake-service
         app.kubernetes.io/component: intake

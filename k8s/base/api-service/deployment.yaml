@@ -18,6 +18,9 @@ spec:
       app.kubernetes.io/name: api-service
   template:
     metadata:
+      annotations:
+        # kubectl logs and exec pick the service, not the init container.
+        kubectl.kubernetes.io/default-container: api-service
       labels:
         app.kubernetes.io/name: api-service
         app.kubernetes.io/component: api
