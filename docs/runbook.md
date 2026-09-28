@@ -1,6 +1,6 @@
 # Remit runbook
 
-Operational procedures. Commands assume the repository root and the ports used by Docker Compose; for Kubernetes, first run `kubectl -n remit port-forward deploy/intake-service 8081:8081`.
+Operational procedures. Commands assume the repository root and the ports used by Docker Compose. On the local Kubernetes deployment (`scripts/k8s-up.sh`) the API is at the same `localhost:8080`; for intake-service's actuator (`localhost:8081` below), first run `kubectl -n remit port-forward deploy/intake-service 8081:8081`, and replace `docker compose exec <service>` with `kubectl -n remit exec <pod or deploy/name>` (for example `kubectl -n remit exec -it kafka-0 -- ...`, `kubectl -n remit exec -it mysql-0 -- ...`).
 
 ## Restart a service
 
@@ -20,6 +20,28 @@ The script exits non-zero if the service is not healthy within 180 s (`--timeout
 | api-service | Tokens stay valid (they are stateless), but the in-memory login lockout is cleared. Unconsumed events are read after the restart; the read model and the audit trail ignore redeliveries. |
 
 `docker compose restart` keeps the container and its environment. After changing `.env`, recreate the container instead so it sees the new values: `docker compose up -d <service>`, then `scripts/deploy.sh compose` to wait for health.
+
+### On Kubernetes
+
+`scripts/restart.sh <service> k8s` runs `kubectl -n remit rollout restart deployment/<service>` and waits for `rollout status` (180 s, `--timeout` to change), then lists the service's pods. It uses the context `kind-remit`; set `REMIT_KUBE_CONTEXT` for another cluster (empty for the current context). How each deployment replaces its pods:
+
+| Service | Strategy | During the restart |
+|---|---|---|
+| intake-service | `Recreate` | The old pod stops before the new one starts, so there is never a second poller. No polling until the new pod is ready (30 to 60 s); a job in flight is interrupted as in the table above, and its staged copy (an `emptyDir`) is gone, so restart it with [Alternative: drop the file again](#alternative-drop-the-file-again). |
+| routing-service | rolling, `maxSurge: 1`, `maxUnavailable: 0` | One new pod at a time; the partitions are rebalanced between the running consumers, so routing continues. A PodDisruptionBudget keeps at least one pod through node drains. |
+| api-service | rolling, `maxSurge: 1`, `maxUnavailable: 0` | The new pod takes traffic once ready, then the old one stops; the NodePort keeps answering. |
+
+Pods read `remit-config` and `remit-secrets` only at startup, so a restart is also how a changed ConfigMap or Secret takes effect (see [Rotate secrets in Kubernetes](#rotate-secrets-in-kubernetes)).
+
+Check the result:
+
+```bash
+kubectl -n remit get pods                      # READY 1/1, RESTARTS 0 for the new pods
+kubectl -n remit describe deployment/routing-service | tail -n 20   # events if a rollout hangs
+scripts/logs.sh -n 20 --no-follow routing-service k8s
+```
+
+A rollout that does not finish usually means the new pod fails its startup probe (up to 200 s) or waits in its `wait-for-dependencies` init container for MySQL, MongoDB, Kafka or SFTP: `kubectl -n remit logs deploy/<service> -c wait-for-dependencies`. `kubectl -n remit rollout undo deployment/<service>` returns to the previous pod template.
 
 Check the result:
 
@@ -223,7 +245,7 @@ api-service signs tokens with one HS256 key, `REMIT_JWT_SECRET` ([ADR 0004](deci
 
 2. Replace the value:
    - compose or a local run: set `REMIT_JWT_SECRET` in `.env`;
-   - Kubernetes: update the `remit` Secret (`scripts/k8s-secrets.sh` rebuilds it from `.env`).
+   - Kubernetes: set it in `.env` and run `scripts/k8s-secrets.sh`, which rebuilds the `remit-secrets` Secret from `.env` (see [Rotate secrets in Kubernetes](#rotate-secrets-in-kubernetes)).
 3. Restart every api-service instance so they all sign and verify with the new key:
    - compose: `docker compose up -d api-service` (recreates the container with the new environment);
    - Kubernetes: `kubectl -n remit rollout restart deployment/api-service` and wait for `kubectl -n remit rollout status deployment/api-service`;
@@ -231,6 +253,28 @@ api-service signs tokens with one HS256 key, `REMIT_JWT_SECRET` ([ADR 0004](deci
 4. Check: `curl -s localhost:8080/actuator/health/readiness` is `UP`, a login returns a token, and an old token now gets 401.
 
 If api-service does not start, its log says why: `REMIT_JWT_SECRET is not set` or `REMIT_JWT_SECRET is N bytes long; HS256 needs at least 32 bytes`.
+
+## Rotate secrets in Kubernetes
+
+On Kubernetes every secret lives in the Secret `remit-secrets` (namespace `remit`); `k8s/base/secret.example.yaml` lists its keys. It is never edited by hand or committed: `scripts/k8s-secrets.sh` builds it from `.env` and applies it (`kubectl apply`, so it creates or replaces it). The values are never printed or passed on a command line.
+
+1. Change the value in `.env` (for example `openssl rand -base64 48` for `REMIT_JWT_SECRET`).
+2. Apply the Secret and restart the services, which only read it at startup:
+
+   ```bash
+   scripts/k8s-secrets.sh --restart     # kubectl apply, then rollout restart and rollout status of the three services
+   ```
+
+   Without `--restart`, restart them yourself: `kubectl -n remit rollout restart deployment` (all of them) or `scripts/restart.sh <service> k8s`.
+3. Check: `kubectl -n remit get pods` shows new pods ready, and a login through `http://localhost:8080/api/v1/auth/login` works.
+
+What a rotation affects:
+
+| Key | Effect |
+|---|---|
+| `REMIT_JWT_SECRET` | Every issued token becomes invalid at once, as in [Rotate the JWT secret](#rotate-the-jwt-secret). |
+| `REMIT_OPERATOR_PASSWORD`, `REMIT_ADMIN_PASSWORD` | Only used to seed missing users; existing users keep their password. |
+| `MYSQL_ROOT_PASSWORD`, `REMIT_*_DB_PASSWORD`, `MONGO_ROOT_*`, `REMIT_MONGO_*`, `REMIT_SFTP_*` | Read by MySQL, MongoDB and SFTP only when their volumes are empty. Change the password inside the server first (for example `ALTER USER 'remit_api'@'%' IDENTIFIED BY '...'` as root in `kubectl -n remit exec -it mysql-0 -- mysql -uroot -p`), then update the Secret and restart the services. On the local cluster the simpler way is a fresh stack: `scripts/k8s-down.sh --keep-cluster`, then `scripts/k8s-up.sh` (this deletes all data). The SFTP pod re-creates its user from the Secret on every start: `kubectl -n remit rollout restart deployment/sftp`, then restart intake-service. |
 
 ## Run the CI pipeline and refresh its evidence
 
