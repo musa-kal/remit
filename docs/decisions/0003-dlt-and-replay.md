@@ -49,20 +49,45 @@ The value deserializer is `ErrorHandlingDeserializer` wrapping a `JsonDeserializ
 
 After the DLT write succeeds, `DeadLetterStatusRecoverer` publishes `InstructionStatusEvent(DEAD_LETTERED)` with the root cause message (at most 500 characters) as `detail`. A poison pill has no readable idempotency key, so it gets only its DLT record; api-service must build its dead-letter entry from the DLT record alone.
 
-### Replay (implemented by api-service in M4)
+### Replay
 
 routing-service defines the contract, api-service enforces the cap:
 
-- api-service consumes `payments.instructions.DLT` and stores each record (payload, headers, first seen, replay count).
-- To replay, api-service reads the stored payload, sets `replayCount` to the stored value plus 1, and publishes it to `payments.instructions` like intake does: key = debtor account, JSON with `__TypeId__ = ca.musakaleem.remit.common.event.PaymentInstruction`, and the five standard headers with `eventType = PAYMENT_INSTRUCTION` and `correlationId = batchId`.
-- api-service refuses a replay when `replayCount >= 3` or when a replay is already pending (409). routing-service does not check the cap.
-- routing-service processes the replay normally. The ledger row is still `ROUTING` (or absent), so the replay is not a duplicate. On success it publishes `REPLAYED` (detail `replay <n>`) and then `ROUTED` or `REQUIRES_REVIEW`, both keyed by idempotency key and therefore in that order on one partition. If the replay fails again, it goes back to the DLT with the incremented `replayCount` in its payload.
-- Poison pills cannot be replayed usefully: their payload is not an instruction.
-- api-service keeps one dead letter per failed instruction across its replays and settles each replay from the status events; see [ADR 0010](0010-api-read-model.md#dead-letters).
+- api-service consumes `payments.instructions.DLT` as raw bytes (`DeadLetterListener`, `DeadLetterRecordParser`) and stores each dead-lettered instruction as one `dead_letter` row (payload, exception, original topic, partition and offset, first seen, replay count, status). The same row follows the instruction through its replays ([ADR 0010](0010-api-read-model.md#dead-letters)).
+- To replay (`POST /api/v1/dead-letters/{id}/replay`, ADMIN only), `ReplayService` locks the row, reads the stored payload, sets `replayCount` to the stored value plus 1, and `ReplayPublisher` publishes it to `payments.instructions` like intake does: key = debtor account, JSON with `__TypeId__ = ca.musakaleem.remit.common.event.PaymentInstruction`, and the five standard headers with `eventType = PAYMENT_INSTRUCTION` and `correlationId = batchId`. The transaction commits only after Kafka acknowledged; otherwise the caller gets 503 and nothing changes. The replay is audited as `DLT_REPLAY_REQUESTED` with actor `user:<admin>`.
+- **The cap lives in api-service only.** `remit.replay.max-replays` (`ReplayProperties`, default 3) is checked in `DeadLetter.requestReplay`: a replay is refused with 409 when `replayCount >= 3`, while a replay is pending, after a successful replay, and for an unreadable record. routing-service does not check the cap and processes a replay like any other instruction; a client that bypassed api-service and republished directly would not be limited, which is acceptable because only api-service and intake-service write to `payments.instructions`.
+- routing-service processes the replay normally. The ledger row is still `ROUTING` (or absent), so the replay is not a duplicate. On success it publishes `REPLAYED` (detail `replay <n>`) and then `ROUTED` or `REQUIRES_REVIEW`, both keyed by idempotency key and therefore in that order on one partition. If the replay fails again, it goes back to the DLT with the incremented `replayCount` in its payload and another `DEAD_LETTERED` status event.
+- Poison pills cannot be replayed: their payload is not an instruction (409, `replayable: false`).
+
+### Dead letter state machine
+
+`DeadLetterStatus` in api-service; the transitions are methods of the `DeadLetter` entity:
+
+```mermaid
+stateDiagram-v2
+  [*] --> PENDING: DLT record stored, replayCount below 3
+  [*] --> EXHAUSTED: DLT record already carries replayCount 3
+  PENDING --> REPLAY_REQUESTED: replay accepted (202), replayCount + 1
+  REPLAY_REQUESTED --> REPLAYED: REPLAYED, ROUTED or REQUIRES_REVIEW status event
+  REPLAY_REQUESTED --> PENDING: DEAD_LETTERED again, replayCount below 3
+  REPLAY_REQUESTED --> EXHAUSTED: DEAD_LETTERED again, replayCount is 3
+  PENDING --> EXHAUSTED: replay requested at the cap (409)
+  REPLAYED --> [*]
+  EXHAUSTED --> [*]
+```
+
+| State | Meaning | Replay request |
+|---|---|---|
+| `PENDING` | On the DLT and not replayed, or its last replay failed again | 202, unless `replayCount` is already 3 (then 409 and `EXHAUSTED`) |
+| `REPLAY_REQUESTED` | Republished, routing-service has not reported the outcome | 409 (pending) |
+| `REPLAYED` | The replay was routed | 409 (already replayed) |
+| `EXHAUSTED` | Replayed 3 times without success | 409 (limit reached) |
+
+Only status events that happened at or after the replay request move a `REPLAY_REQUESTED` row (`DeadLetter.onInstructionStatus`), so a late event of an earlier attempt cannot settle the current replay. The DLT record of a failed replay can arrive before or after its `DEAD_LETTERED` status event; whichever comes first moves the row back to `PENDING` or on to `EXHAUSTED`, and the second does not change the status again.
 
 ## Consequences
 
 - One bad record costs its partition about 3 seconds, not an outage.
 - Everything that leaves routing-service without being routed is on the DLT with enough headers to explain why, and (unless unreadable) a `DEAD_LETTERED` status event.
-- If publishing `DEAD_LETTERED` fails after the DLT write, the error handler treats recovery as failed and the record is delivered again, which can produce a second DLT record for it. api-service should key dead letters by original topic, partition and offset.
+- If publishing `DEAD_LETTERED` fails after the DLT write, the error handler treats recovery as failed and the record is delivered again, which can produce a second DLT record for it. api-service therefore keys dead letters by original topic, partition and offset (unique index on `dead_letter`), so the second record changes nothing.
 - The back-off blocks the consumer thread. Non-blocking retry topics (`@RetryableTopic`) would avoid that at the cost of more topics and weaker ordering; the spec asks for a blocking `DefaultErrorHandler`.
