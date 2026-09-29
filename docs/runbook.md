@@ -421,6 +421,23 @@ What a rotation affects:
 | `REMIT_OPERATOR_PASSWORD`, `REMIT_ADMIN_PASSWORD` | Only used to seed missing users; existing users keep their password. |
 | `MYSQL_ROOT_PASSWORD`, `REMIT_*_DB_PASSWORD`, `MONGO_ROOT_*`, `REMIT_MONGO_*`, `REMIT_SFTP_*` | Read by MySQL, MongoDB and SFTP only when their volumes are empty. Change the password inside the server first (for example `ALTER USER 'remit_api'@'%' IDENTIFIED BY '...'` as root in `kubectl -n remit exec -it mysql-0 -- mysql -uroot -p`), then update the Secret and restart the services. On the local cluster the simpler way is a fresh stack: `scripts/k8s-down.sh --keep-cluster`, then `scripts/k8s-up.sh` (this deletes all data). The SFTP pod re-creates its user from the Secret on every start: `kubectl -n remit rollout restart deployment/sftp`, then restart intake-service. |
 
+## Reset the local stack
+
+The samples are accepted once per database (duplicate file detection), so a repeat demo, a second smoke test or a password change in `.env` needs empty volumes. Every reset below deletes all batches, the audit trail, the Kafka topics and the SFTP directories.
+
+| Goal | Docker Compose | Kubernetes (kind) |
+|---|---|---|
+| Stop, keep the data | `docker compose down` | `kubectl -n remit scale deployment --all --replicas=0` (scale back with `scripts/k8s-up.sh`) |
+| Empty every volume and start again | `docker compose down -v`, then `scripts/deploy.sh compose` | `scripts/k8s-down.sh --keep-cluster`, then `scripts/k8s-up.sh` (about 1.5 minutes, the images stay loaded) |
+| Fresh stack plus the samples, checked | `scripts/smoke-test.sh --reset --keep` | `scripts/k8s-down.sh --keep-cluster && scripts/k8s-up.sh && scripts/smoke-test.sh --target k8s` |
+| Remove everything | `docker compose down -v --rmi local` | `scripts/k8s-down.sh` (deletes the cluster) |
+
+Notes:
+
+- `.env` is read again on `up`, and the init scripts in `docker/` (schemas, users, MongoDB indexes, topics) run again on the empty volumes, so a reset is also the way to apply changed database passwords.
+- The CI stack is separate: `ci/docker-compose.jenkins.yml` and its `remit-ci_*` volumes are not touched by any of the commands above.
+- Rebuilding only the api-service read model (possible because every projection is idempotent, [ADR 0010](decisions/0010-api-read-model.md)): stop api-service (`docker compose stop api-service`), reset its consumer group with `MSYS_NO_PATHCONV=1 docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group api-service --reset-offsets --to-earliest --all-topics --execute`, and start it again (`docker compose up -d api-service`). Existing rows and audit documents stay as they are and redelivered events change nothing; to rebuild from scratch, truncate the `remit_api` read model tables (not `app_user`, `app_user_role` or `flyway_schema_history`) before starting it. This procedure is not exercised by the automated tests.
+
 ## Run the CI pipeline and refresh its evidence
 
 The Jenkins pipeline runs on the local CI stack ([ci/README.md](../ci/README.md)).
