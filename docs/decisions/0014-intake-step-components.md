@@ -23,6 +23,6 @@ The spec allows either. `KafkaItemWriter` (Spring Batch 5.2) sends each item wit
 
 ## Consequences
 
-- The processor and the writer are ordinary classes with unit tests; `IngestJobConfig` wires them with the standard chunk, skip and listener APIs.
+- The processor and the writer are ordinary classes (`InstructionItemProcessorTest` covers the processor, the job integration tests cover the writer against Kafka); `IngestJobConfig` wires them with the standard chunk, skip and listener APIs.
 - Anyone who reads FR-INT-04 literally will look for `ValidatingItemProcessor` and `KafkaItemWriter` and not find them; this ADR explains why.
 - Polling is single-threaded and processes one file at a time. That fits the file sizes in scope (10,000 rows in about 3 s of job time); parallel files would need a second job launcher thread and care with the per-file MDC.
