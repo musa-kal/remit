@@ -331,26 +331,75 @@ curl -s "localhost:8080/api/v1/audit-events?entityId=<idempotencyKey>&eventType=
 
 ## Rotate the JWT secret
 
-api-service signs tokens with one HS256 key, `REMIT_JWT_SECRET` ([ADR 0004](decisions/0004-jwt-approach.md)). Rotate it when it may have leaked, and as routine hygiene. Rotation invalidates every issued token immediately: callers get 401 `The access token is invalid` and must log in again, at most 15 minutes of tokens are affected.
+api-service signs tokens with one HS256 key, `REMIT_JWT_SECRET` ([ADR 0004](decisions/0004-jwt-approach.md)). Rotate it when it may have leaked, and as routine hygiene. Rotation invalidates every issued token immediately: callers get 401 `The access token is invalid` and must log in again. Tokens live 15 minutes, so nothing older is affected, and there is no refresh token to revoke.
 
-1. Generate a new secret of at least 32 bytes:
+Generate a new secret of at least 32 bytes:
+
+```bash
+openssl rand -base64 48
+```
+
+### Docker Compose (or a local jar)
+
+1. Set `REMIT_JWT_SECRET` in `.env`.
+2. Recreate api-service so it reads the new environment (a plain `restart` keeps the old one):
 
    ```bash
-   openssl rand -base64 48
+   docker compose up -d api-service
+   scripts/deploy.sh compose             # waits until every service is healthy again
    ```
 
-2. Replace the value:
-   - compose or a local run: set `REMIT_JWT_SECRET` in `.env`;
-   - Kubernetes: set it in `.env` and run `scripts/k8s-secrets.sh`, which rebuilds the `remit-secrets` Secret from `.env` (see [Rotate secrets in Kubernetes](#rotate-secrets-in-kubernetes)).
-3. Restart every api-service instance so they all sign and verify with the new key:
-   - compose: `docker compose up -d api-service` (recreates the container with the new environment);
-   - Kubernetes: `kubectl -n remit rollout restart deployment/api-service` and wait for `kubectl -n remit rollout status deployment/api-service`;
-   - local jar: stop it and start it again after `set -a; . ./.env; set +a`.
-4. Check: `curl -s localhost:8080/actuator/health/readiness` is `UP`, a login returns a token, and an old token now gets 401.
+   For a local jar: stop it and start it again after `set -a; . ./.env; set +a`.
 
-If api-service does not start, its log says why: `REMIT_JWT_SECRET is not set` or `REMIT_JWT_SECRET is N bytes long; HS256 needs at least 32 bytes`.
+### Kubernetes
 
-## Rotate secrets in Kubernetes
+1. Set `REMIT_JWT_SECRET` in `.env`.
+2. Rebuild the Secret from `.env` and restart the services that read it:
+
+   ```bash
+   scripts/k8s-secrets.sh --restart      # kubectl apply of remit-secrets, then rollout restart + status
+   ```
+
+   Or by hand: `scripts/k8s-secrets.sh`, then `kubectl -n remit rollout restart deployment/api-service` and `kubectl -n remit rollout status deployment/api-service`. Every api-service replica must restart, or replicas would disagree about which tokens are valid.
+
+### Check
+
+- `curl -s localhost:8080/actuator/health/readiness` is `UP`.
+- A login returns a token, and a call with it answers 200.
+- A token issued before the rotation now gets 401.
+
+If api-service does not start, its log says why: `REMIT_JWT_SECRET is not set` or `REMIT_JWT_SECRET is N bytes long; HS256 needs at least 32 bytes`. On Kubernetes the pod then crash-loops and the rollout does not finish; `kubectl -n remit logs deploy/api-service` shows the message, and `kubectl -n remit rollout undo deployment/api-service` does not help because the Secret, not the pod template, changed: fix `.env` and run `scripts/k8s-secrets.sh --restart` again.
+
+## Rotate other secrets
+
+Every other secret is a password of MySQL, MongoDB or SFTP. Those servers read the values from the environment only when their data volume is empty, so a rotation has two parts: change the password inside the server, then give the services the new value.
+
+| Variable | Read by | Notes |
+|---|---|---|
+| `MYSQL_ROOT_PASSWORD` | MySQL (init), the healthcheck, the runbook's SQL shells | not used by the services |
+| `REMIT_INTAKE_DB_PASSWORD`, `REMIT_ROUTING_DB_PASSWORD`, `REMIT_API_DB_PASSWORD` | MySQL users `remit_intake`, `remit_routing`, `remit_api` (init) and each service | |
+| `MONGO_ROOT_PASSWORD` | MongoDB (init) | not used by the services |
+| `REMIT_MONGO_PASSWORD` | MongoDB user `remit_audit` (init) and api-service | URL-safe characters only |
+| `REMIT_SFTP_PASSWORD` | SFTP user (re-created on every container start) and intake-service | |
+| `REMIT_OPERATOR_PASSWORD`, `REMIT_ADMIN_PASSWORD` | api-service user seeding only | an existing user keeps its password; changing it means updating the BCrypt hash in `remit_api.app_user` or a fresh database |
+
+On a local stack the simplest rotation is a reset with the new values in `.env` ([Reset the local stack](#reset-the-local-stack)); it deletes all data.
+
+### Rotate secrets in Docker Compose
+
+Keeping the data, for one database user (here `remit_api`):
+
+```bash
+NEW='new-password'    # then put the same value in .env as REMIT_API_DB_PASSWORD
+docker compose exec mysql sh -c "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"ALTER USER 'remit_api'@'%' IDENTIFIED BY '$NEW'\""
+docker compose up -d api-service && scripts/deploy.sh compose
+```
+
+- MongoDB application user: `docker compose exec mongo mongosh -u root -p --authenticationDatabase admin --eval "db.getSiblingDB('remit_audit').changeUserPassword('remit_audit', '<new>')"`, update `REMIT_MONGO_PASSWORD` in `.env`, then `docker compose up -d api-service`.
+- SFTP: update `REMIT_SFTP_PASSWORD` in `.env`, then `docker compose up -d sftp intake-service` (the container re-creates the user from `SFTP_USERS` on start; its host key changes too, which intake-service accepts).
+- Root passwords: change them in the server the same way (`ALTER USER` for both `'root'@'%'` and `'root'@'localhost'`, `changeUserPassword('root', ...)` in the `admin` database), then update `.env` so the healthchecks keep working (`docker compose up -d mysql mongo`).
+
+### Rotate secrets in Kubernetes
 
 On Kubernetes every secret lives in the Secret `remit-secrets` (namespace `remit`); `k8s/base/secret.example.yaml` lists its keys. It is never edited by hand or committed: `scripts/k8s-secrets.sh` builds it from `.env` and applies it (`kubectl apply`, so it creates or replaces it). The values are never printed or passed on a command line.
 
