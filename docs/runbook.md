@@ -291,6 +291,29 @@ curl -s -X POST localhost:8080/api/v1/dead-letters/1/replay -H "Authorization: B
 | 404 | Wrong id |
 | 503 | Kafka did not acknowledge; nothing changed, try again |
 
+### What to watch while it runs
+
+A replay takes a few seconds when it succeeds and about 3 s of retries when it fails again. Follow it in three places:
+
+```bash
+scripts/logs.sh -c routing-service | jq -c 'select(.idempotencyKey == "<idempotencyKey>") | {message, level}'
+scripts/logs.sh -c api-service | jq -c 'select(.idempotencyKey == "<idempotencyKey>" or (.message | test("replayed dead letter"; "i"))) | {message, level}'
+```
+
+| Where | Success | Failure again |
+|---|---|---|
+| api-service log | `Replayed dead letter <id> as replay <n> of 3`, then `Instruction status REPLAYED` and `Instruction status ROUTED` | `Replayed dead letter ...`, then `Dead letter <id> from payments.instructions-<p>@<offset>: ...` and `Instruction status DEAD_LETTERED` |
+| routing-service log | `Resuming an unfinished instruction, attempt <n>`, then `Routed EFT ... (debtor account ***1234, replay <n>)` | `Resuming an unfinished instruction ...` on each attempt, then `Instruction dead-lettered: <cause>` |
+| `payments.status-events` | `REPLAYED` (detail `replay <n>`), then `ROUTED` or `REQUIRES_REVIEW` | `DEAD_LETTERED` |
+| `payments.instructions.DLT` | nothing new | one new record whose payload carries `"replayCount": <n>` |
+| `GET /dead-letters/{id}` state | `REPLAYED` | `PENDING`, or `EXHAUSTED` after the third replay |
+
+To see the status events themselves (keyed by idempotency key):
+
+```bash
+MSYS_NO_PATHCONV=1 docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh   --bootstrap-server localhost:9092 --topic payments.status-events --from-beginning --timeout-ms 5000   --property print.key=true | grep '<idempotencyKey>'
+```
+
 ### 4. Check the outcome
 
 ```bash
