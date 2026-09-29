@@ -1,14 +1,41 @@
 # Remit runbook
 
-Operational procedures. Commands assume the repository root and the ports used by Docker Compose. On the local Kubernetes deployment (`scripts/k8s-up.sh`) the API is at the same `localhost:8080`; for intake-service's actuator (`localhost:8081` below), first run `kubectl -n remit port-forward deploy/intake-service 8081:8081`, and replace `docker compose exec <service>` with `kubectl -n remit exec <pod or deploy/name>` (for example `kubectl -n remit exec -it kafka-0 -- ...`, `kubectl -n remit exec -it mysql-0 -- ...`).
+Operational procedures for the local Docker Compose stack and the local Kubernetes (kind) deployment. The design behind them is in [architecture.md](architecture.md) and the [decision records](decisions/README.md).
+
+## Contents
+
+- [Conventions](#conventions)
+- [Restart a service](#restart-a-service)
+  - [With Docker Compose](#with-docker-compose)
+  - [On Kubernetes](#on-kubernetes)
+- [Restart a failed batch job (FR-INT-06)](#restart-a-failed-batch-job-fr-int-06)
+- [Inspect the DLT](#inspect-the-dlt)
+- [Replay a DLT message](#replay-a-dlt-message)
+- [Rotate the JWT secret](#rotate-the-jwt-secret)
+- [Rotate other secrets](#rotate-other-secrets)
+  - [Rotate secrets in Docker Compose](#rotate-secrets-in-docker-compose)
+  - [Rotate secrets in Kubernetes](#rotate-secrets-in-kubernetes)
+- [Reset the local stack](#reset-the-local-stack)
+- [Common failure signatures](#common-failure-signatures)
+- [Recover from a login lockout](#recover-from-a-login-lockout)
+- [Run the CI pipeline and refresh its evidence](#run-the-ci-pipeline-and-refresh-its-evidence)
+
+## Conventions
+
+- Commands run from the repository root in Bash (Git Bash on Windows), with `.env` filled in. Many examples load it first: `set -a; . ./.env; set +a`.
+- Ports are the compose defaults: api-service `localhost:8080`, intake-service `localhost:8081`, routing-service `localhost:8082`, MySQL `localhost:3307`.
+- On the local Kubernetes deployment (`scripts/k8s-up.sh`) the API is at the same `localhost:8080`. For intake-service's actuator (`localhost:8081` below), first run `kubectl -n remit port-forward deploy/intake-service 8081:8081`, and replace `docker compose exec <service>` with `kubectl -n remit exec <pod or deploy/name>` (for example `kubectl -n remit exec -it kafka-0 -- ...`, `kubectl -n remit exec -it mysql-0 -- ...`).
+- On Git Bash for Windows, prefix `docker compose exec` commands that pass absolute container paths with `MSYS_NO_PATHCONV=1`.
+- Logs are JSON; `scripts/logs.sh <service> [compose|k8s]` follows them pretty-printed (`--no-follow -n 50` for the last lines). Filter one batch or instruction with jq, for example `scripts/logs.sh -c --no-follow intake-service | jq 'select(.correlationId == "<batch id>")'`.
 
 ## Restart a service
 
 Restart a service after changing its configuration, to recover it when its health stays `DOWN` after the cause is fixed (for example MySQL was restarted underneath it), or to pick up a rotated secret.
 
+### With Docker Compose
+
 ```bash
-scripts/restart.sh routing-service            # compose: docker compose restart, then waits for the healthcheck
-scripts/restart.sh api-service k8s            # kubectl -n remit rollout restart + rollout status
+scripts/restart.sh routing-service            # docker compose restart, then waits for the healthcheck
 ```
 
 The script exits non-zero if the service is not healthy within 180 s (`--timeout` to change). What a restart does to work in flight:
@@ -20,6 +47,14 @@ The script exits non-zero if the service is not healthy within 180 s (`--timeout
 | api-service | Tokens stay valid (they are stateless), but the in-memory login lockout is cleared. Unconsumed events are read after the restart; the read model and the audit trail ignore redeliveries. |
 
 `docker compose restart` keeps the container and its environment. After changing `.env`, recreate the container instead so it sees the new values: `docker compose up -d <service>`, then `scripts/deploy.sh compose` to wait for health.
+
+Check the result:
+
+```bash
+docker compose ps                              # STATUS shows (healthy)
+curl -s localhost:8082/actuator/health | jq    # components db and kafka UP (8080 api, 8081 intake)
+scripts/logs.sh -n 20 --no-follow routing-service
+```
 
 ### On Kubernetes
 
@@ -42,14 +77,6 @@ scripts/logs.sh -n 20 --no-follow routing-service k8s
 ```
 
 A rollout that does not finish usually means the new pod fails its startup probe (up to 200 s) or waits in its `wait-for-dependencies` init container for MySQL, MongoDB, Kafka or SFTP: `kubectl -n remit logs deploy/<service> -c wait-for-dependencies`. `kubectl -n remit rollout undo deployment/<service>` returns to the previous pod template.
-
-Check the result:
-
-```bash
-docker compose ps                              # STATUS shows (healthy)
-curl -s localhost:8082/actuator/health | jq    # components db and kafka UP (8080 api, 8081 intake)
-scripts/logs.sh -n 20 --no-follow routing-service
-```
 
 ## Restart a failed batch job (FR-INT-06)
 
