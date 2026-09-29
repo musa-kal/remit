@@ -438,6 +438,34 @@ Notes:
 - The CI stack is separate: `ci/docker-compose.jenkins.yml` and its `remit-ci_*` volumes are not touched by any of the commands above.
 - Rebuilding only the api-service read model (possible because every projection is idempotent, [ADR 0010](decisions/0010-api-read-model.md)): stop api-service (`docker compose stop api-service`), reset its consumer group with `MSYS_NO_PATHCONV=1 docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group api-service --reset-offsets --to-earliest --all-topics --execute`, and start it again (`docker compose up -d api-service`). Existing rows and audit documents stay as they are and redelivered events change nothing; to rebuild from scratch, truncate the `remit_api` read model tables (not `app_user`, `app_user_role` or `flyway_schema_history`) before starting it. This procedure is not exercised by the automated tests.
 
+## Common failure signatures
+
+Search the JSON logs (`scripts/logs.sh -n all --no-follow <service>`) for these messages.
+
+| Service | Log message (or its start) | Meaning | What to do |
+|---|---|---|---|
+| intake | `SFTP poll of /inbound failed: ...` | The poller could not list the directory (SFTP down, wrong password, network) | Check `docker compose ps sftp` and `REMIT_SFTP_*`; the next poll retries on its own |
+| intake | `Rejecting <file>: name does not match PAY_<CLIENTID>_<yyyyMMddHHmmss>.csv` | Bad file name; the file went to `/error` with `INVALID_FILENAME` | The client must rename and resend |
+| intake | `Rejected file: <REASON> (<detail>)`, then `File <file> moved to error: <REASON>` | File-level rejection (`DUPLICATE_FILE`, `INVALID_HEADER`, `INVALID_TRAILER`, `RECORD_COUNT_MISMATCH`, `CONTROL_TOTAL_MISMATCH`, `EMPTY_FILE`, `INVALID_ENCODING`); the second line alone also follows a batch FAILED by the rejection threshold | Nothing to restart; read `<file>.error.txt` in `/error` and ask for a corrected file ([ADR 0007](decisions/0007-intake-failure-handling.md)) |
+| intake | `File <file> with the same content was already processed` | The same name and content ran before (`JobInstanceAlreadyCompleteException`), treated as `DUPLICATE_FILE` | None |
+| intake | `Job for <file> did not complete (execution N: ...); file left in /processing for a restart` | Technical failure during the job (Kafka or MySQL) | [Restart a failed batch job](#restart-a-failed-batch-job-fr-int-06) |
+| intake | `Could not run the ingest job for <file>: ...` | The job could not start, for example an execution of the same instance is still `STARTED` | Check `/actuator/ingestjobs`; see [A job stuck in STARTED](#a-job-stuck-in-started) |
+| intake | `Processing <file> failed; it will be retried on a later poll` | An error outside the job (download, staging, a remote move) | Fix the cause; the file is retried while it is still in `/inbound` |
+| intake | `Business date pinned to 2026-10-15 by remit.clock.fixed-date; use only for demos and tests` (WARN at startup) | `REMIT_CLOCK_FIXED_DATE` is set ([ADR 0005](decisions/0005-demo-clock.md)) | Expected in compose and the kind overlay; must not appear in a real deployment |
+| routing | `Chaos hook enabled: remittanceInfo FORCE_FAIL forces a routing failure` (WARN at startup) | `remit.routing.chaos-enabled` is on | Expected in `local`, `docker` and the kind overlay |
+| routing | `Resuming an unfinished instruction, attempt N` | A redelivery, retry or replay of an instruction whose ledger row is still `ROUTING` | Normal after a restart, a retry or a replay; repeated attempts for one key end on the DLT |
+| routing | `Duplicate delivery of an instruction already ROUTED; not routed again` | A cross-file or redelivered duplicate | None; it appears as `DUPLICATE` in the instruction history |
+| routing | `Instruction dead-lettered: <cause>` | Three failed attempts or a non-retryable failure | [Inspect the DLT](#inspect-the-dlt) |
+| routing | `Unreadable record <topic>-<p>@<offset> dead-lettered without a status event: ...` | A poison pill on `payments.instructions` | Find the producer; it cannot be replayed |
+| api | `Skipping <topic>-<p>@<offset> after it failed: ...` (ERROR) | A record failed five times in a read model listener and was skipped; the read model misses it | Fix the cause (usually MySQL or MongoDB), then rebuild the read model ([Reset the local stack](#reset-the-local-stack)) |
+| api | `Username <name> locked after repeated failed logins` | Five failed logins within 10 minutes | [Recover from a login lockout](#recover-from-a-login-lockout) |
+| api | `REMIT_JWT_SECRET is not set` or `... HS256 needs at least 32 bytes` (startup fails) | Missing or short signing key | Set it as in [Rotate the JWT secret](#rotate-the-jwt-secret) |
+| api | `Unhandled exception` (ERROR; the client got a 500 ProblemDetail) | A bug or an unexpected infrastructure error; the stack trace is in the log only | Find the line by the `X-Correlation-Id` of the response |
+| any | `Access denied for user 'remit_...'` (MySQL driver) | The database password in `.env` or the Secret does not match the server | [Rotate other secrets](#rotate-other-secrets), or reset the stack |
+| any | `Communications link failure` (MySQL driver), `Connection to node -1 ... could not be established` (Kafka client) | MySQL or Kafka is down or not ready yet | `docker compose ps` or `kubectl -n remit get pods`; the services recover when it is back, or [restart them](#restart-a-service) if their health stays `DOWN` |
+| any | Flyway `Validate failed: Migrations have failed validation` | An applied migration was edited | Never edit an applied migration; reset the local stack |
+| api | `Command failed with error 18 (AuthenticationFailed)` (MongoDB driver) | `REMIT_MONGO_PASSWORD` does not match the `remit_audit` user | As for the MySQL passwords above |
+
 ## Run the CI pipeline and refresh its evidence
 
 The Jenkins pipeline runs on the local CI stack ([ci/README.md](../ci/README.md)).
