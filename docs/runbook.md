@@ -94,11 +94,57 @@ Job for PAY_ACME01_20261015093000.csv did not complete (execution 42: job FAILED
 curl -s localhost:8081/actuator/ingestjobs | jq '.[] | select(.status == "FAILED")'
 ```
 
-Each entry shows `executionId`, `fileName`, `status`, `exitCode` and `batchStatus`. The exit description (the error) is in the JSON log line above, or in MySQL:
+Each entry shows `executionId`, `fileName`, `status`, `exitCode` and `batchStatus`. The exit description (the error) is in the JSON log line above, or in the Spring Batch metadata tables (next section).
+
+### Spring Batch metadata queries
+
+The job repository lives in `remit_intake`. Open a MySQL shell as root (the `remit_intake` user can read the tables too, but the `UPDATE` in [A job stuck in STARTED](#a-job-stuck-in-started) is easiest as root):
+
+```bash
+docker compose exec mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" remit_intake'
+# Kubernetes: kubectl -n remit exec -it mysql-0 -- sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" remit_intake'
+```
+
+Recent executions with their file and outcome:
 
 ```sql
-SELECT JOB_EXECUTION_ID, STATUS, EXIT_MESSAGE FROM remit_intake.BATCH_JOB_EXECUTION
+SELECT e.JOB_EXECUTION_ID, e.JOB_INSTANCE_ID, e.STATUS, e.EXIT_CODE, e.START_TIME, e.END_TIME,
+       p.PARAMETER_VALUE AS FILE_NAME
+FROM BATCH_JOB_EXECUTION e
+JOIN BATCH_JOB_EXECUTION_PARAMS p
+  ON p.JOB_EXECUTION_ID = e.JOB_EXECUTION_ID AND p.PARAMETER_NAME = 'fileName'
+ORDER BY e.JOB_EXECUTION_ID DESC LIMIT 10;
+```
+
+Why one failed:
+
+```sql
+SELECT JOB_EXECUTION_ID, STATUS, EXIT_MESSAGE FROM BATCH_JOB_EXECUTION
 WHERE STATUS = 'FAILED' ORDER BY JOB_EXECUTION_ID DESC LIMIT 5;
+```
+
+How far each step got (replace 42). `READ_COUNT` and `WRITE_COUNT` of `instructionStep` show how many rows were read and published in committed chunks (100 rows each); a restart resumes after the last committed chunk:
+
+```sql
+SELECT STEP_NAME, STATUS, EXIT_CODE, READ_COUNT, WRITE_COUNT, PROCESS_SKIP_COUNT,
+       COMMIT_COUNT, ROLLBACK_COUNT, START_TIME, END_TIME
+FROM BATCH_STEP_EXECUTION WHERE JOB_EXECUTION_ID = 42 ORDER BY STEP_EXECUTION_ID;
+```
+
+Every execution of the same file (one job instance per file name and content hash; a restart adds an execution to the same instance):
+
+```sql
+SELECT e.JOB_EXECUTION_ID, e.STATUS, e.EXIT_CODE, e.START_TIME
+FROM BATCH_JOB_EXECUTION e
+WHERE e.JOB_INSTANCE_ID = (SELECT JOB_INSTANCE_ID FROM BATCH_JOB_EXECUTION WHERE JOB_EXECUTION_ID = 42)
+ORDER BY e.JOB_EXECUTION_ID;
+```
+
+The file registry row of the batch (`status` is `RECEIVED` until `finalizeStep` ran):
+
+```sql
+SELECT batch_id, file_name, status, reason_code, received_at, completed_at FROM file_registry
+WHERE file_name = 'PAY_ACME01_20261015093000.csv';
 ```
 
 ### 2. Fix the cause
