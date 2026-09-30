@@ -60,5 +60,7 @@ Users live in `app_user` and `app_user_role` with BCrypt hashes (strength 10). T
 ## Consequences
 
 - The lockout is per instance and lost on restart, which FR-SEC-06 allows. With N replicas an attacker gets 5 x N attempts per ten minutes; a shared store (MySQL or Redis) would fix that.
-- There is one signing key and no `kid` header, so rotating `REMIT_JWT_SECRET` invalidates every issued token at once. For a 15 minute token that is acceptable; see "Rotate the JWT secret" in the runbook.
+- There is one signing key and no `kid` header, so rotating `REMIT_JWT_SECRET` invalidates every issued token at once. For a 15 minute token that is acceptable; see [Rotate the JWT secret](../runbook.md#rotate-the-jwt-secret).
+- There is no unlock endpoint: a locked username waits out the 10 minutes or api-service is restarted ([Recover from a login lockout](../runbook.md#recover-from-a-login-lockout)).
+- Where the filter sits in the chain and how the `roles` claim becomes the authorities `@PreAuthorize` checks is drawn in [architecture.md](../architecture.md#security).
 - Swapping to `oauth2-resource-server` later would only replace `JwtService` and `JwtAuthenticationFilter`; the claims, roles and `@PreAuthorize` rules stay the same.
