@@ -601,4 +601,4 @@ Remit is a portfolio project. It moves no money and connects to no bank, clearin
 - [x] M6 Postman: collection and environments, Newman run
 - [x] M7 CI: Jenkins and SonarQube, quality gate
 - [x] M8 Kubernetes + scripts: kustomize base and local overlay on kind, ops scripts
-- [ ] M9 Docs: runbook, architecture notes, ADRs
+- [x] M9 Docs: README, architecture document, runbook, ADRs 0001 to 0014 with an index
