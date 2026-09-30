@@ -1,8 +1,13 @@
 # Remit
 
 [![CI](https://github.com/Musa-Kal/remit/actions/workflows/ci.yml/badge.svg)](https://github.com/Musa-Kal/remit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Remit is a payment file gateway. Clients drop CSV payment batch files on an SFTP server; `intake-service` picks them up, validates every payment instruction with Spring Batch, and publishes valid instructions to Kafka. `routing-service` consumes those instructions idempotently and routes each one to a payment channel (EFT, WIRE, INTERAC), dead-lettering failures after retries. `api-service` gives operators a JWT-secured REST API to monitor batches, inspect rejected rows, and replay dead-lettered messages, and it writes every state change to an append-only audit trail in MongoDB. No real money moves and no real bank is involved: channel limits and rules are illustrative.
+
+## Contents
+
+[Architecture](#architecture) · [Stack](#stack) · [Quick start](#quick-start) · [Sample walkthrough](#sample-walkthrough) · [API summary](#api-summary) · [Services](#services) · [Build](#build) · [Testing](#testing) · [CI](#ci) · [Kubernetes](#kubernetes-local) · [Measured performance](#measured-performance) · [Scripts](#scripts) · [Design decisions](#design-decisions) · [Operations](#operations) · [Repository layout](#repository-layout) · [Illustrative limits](#illustrative-limits) · [License](#license) · [Status](#status)
 
 ## Architecture
 
@@ -36,6 +41,8 @@ Remit is a payment file gateway. Clients drop CSV payment batch files on an SFTP
 ```
 
 Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_api`) and never reads another service's data; everything crosses service boundaries as a Kafka event. See [ADR 0001](docs/decisions/0001-service-boundaries.md).
+
+[docs/architecture.md](docs/architecture.md) has the full picture: Mermaid diagrams of the components, the topic table with keys, producers and consumers, the path of one instruction from the SFTP drop to the routed topic and the operator API (every class it touches, in order), the idempotency and dead-letter design, the security filter chain, the data model, the profiles and observability.
 
 ## Stack
 
