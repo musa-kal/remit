@@ -27,3 +27,4 @@ Services share data only through Kafka events. A service never connects to anoth
 - `api-service` sees state only as fast as events arrive, so its read model is eventually consistent.
 - There is more infrastructure to run locally (MySQL, MongoDB, Kafka, SFTP); Docker Compose and the Kubernetes overlay provide it in one command.
 - Cross-service queries are not possible by design; anything an operator needs must be carried in an event and projected by `api-service`.
+- The topic table (keys, producers, consumers) and the schemas each service owns are listed in [architecture.md](../architecture.md#kafka-topics).
