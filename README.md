@@ -538,6 +538,44 @@ Tuning, starting from the first measurement (one run each unless noted):
 
 Also tried without a measurable gain: turning off the MySQL binary log. Deliberately unchanged: routing-service still awaits every publish and commits twice per instruction ([ADR 0002](docs/decisions/0002-idempotency.md)), topics keep 3 partitions (so 3 routing threads), and the intake chunk size stays 100.
 
+## Design decisions
+
+The decisions behind the code are recorded as ADRs in [docs/decisions/](docs/decisions/README.md); [docs/architecture.md](docs/architecture.md) shows how they fit together, including the path of one instruction through every class.
+
+| ADR | Decision |
+|---|---|
+| [0001](docs/decisions/0001-service-boundaries.md) | Three services, one MySQL schema each, data shared only through Kafka |
+| [0002](docs/decisions/0002-idempotency.md) | Idempotent routing with a MySQL ledger keyed by idempotency key; crash cases and the limits of "exactly once" |
+| [0003](docs/decisions/0003-dlt-and-replay.md) | Retries, the dead-letter topic, poison pills, replay capped at 3 by api-service and the dead letter state machine |
+| [0004](docs/decisions/0004-jwt-approach.md) | jjwt HS256 tokens, a custom filter, `@PreAuthorize` roles, seeding in Java, in-memory lockout |
+| [0005](docs/decisions/0005-demo-clock.md) | Injected clock and a demo business date for the committed samples |
+| [0006](docs/decisions/0006-sample-duplicate-instruction.md) | Where the samples show a cross-file duplicate |
+| [0007](docs/decisions/0007-intake-failure-handling.md) | File, batch and job failures in intake-service |
+| [0008](docs/decisions/0008-channel-rules-per-service.md) | Channel rules bound separately in intake and routing |
+| [0009](docs/decisions/0009-audit-event-types.md) | Audit event types and deterministic event ids |
+| [0010](docs/decisions/0010-api-read-model.md) | The api-service read model and dead letter bookkeeping |
+| [0011](docs/decisions/0011-local-stack-settings.md) | Local compose settings (MySQL fsync, poll interval, demo date) |
+| [0012](docs/decisions/0012-ci-docker-strategy.md) | Docker-in-Docker for the Jenkins pipeline |
+| [0013](docs/decisions/0013-kubernetes-local-overlay.md) | Kubernetes base and the local kind overlay |
+| [0014](docs/decisions/0014-intake-step-components.md) | Own processor and `KafkaTemplate` writer in the batch job, a scheduled poller over a gateway |
+
+## Operations
+
+[docs/runbook.md](docs/runbook.md) has the procedures, each for Docker Compose and Kubernetes:
+
+- [restart a service](docs/runbook.md#restart-a-service) and [restart a failed batch job](docs/runbook.md#restart-a-failed-batch-job-fr-int-06) (actuator endpoint and Spring Batch metadata queries)
+- [inspect the DLT](docs/runbook.md#inspect-the-dlt) and [replay a DLT message](docs/runbook.md#replay-a-dlt-message)
+- [rotate the JWT secret](docs/runbook.md#rotate-the-jwt-secret) and [other secrets](docs/runbook.md#rotate-other-secrets)
+- [reset the local stack](docs/runbook.md#reset-the-local-stack), [common failure signatures](docs/runbook.md#common-failure-signatures) and [login lockout recovery](docs/runbook.md#recover-from-a-login-lockout)
+
+## Illustrative limits
+
+Remit is a portfolio project. It moves no money and connects to no bank, clearing system or payment network. The channel rules (INTERAC: CAD only, at most 10,000.00; EFT: at most 25,000,000.00; WIRE: no maximum, review from 1,000,000.00), the file format, the reason codes and the sample data are **illustrative**: they are not the rules or limits of Payments Canada, Interac or any bank, and the names and account numbers in `samples/` are fake. The security model (one symmetric JWT key, an in-memory lockout, seeded demo users) and the local stacks (single Kafka broker, relaxed MySQL durability in compose) are sized for a laptop, as the ADRs explain.
+
+## License
+
+[MIT](LICENSE), copyright 2026 Musa Kaleem.
+
 ## Status
 
 - [x] M0 Scaffold: parent POM, four modules, Spotless and JaCoCo configured
