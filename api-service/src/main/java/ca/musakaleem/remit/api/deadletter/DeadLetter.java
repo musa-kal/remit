@@ -146,7 +146,7 @@ public class DeadLetter {
    * before the exception is thrown.
    *
    * @param maxReplays replay cap
-   * @param now current time
+   * @param requestedAt when the replay was requested
    * @throws ReplayRejectedException when the replay is not allowed
    */
   public void requestReplay(int maxReplays, Instant requestedAt) {
