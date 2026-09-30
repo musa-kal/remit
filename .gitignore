@@ -36,3 +36,6 @@ staging/
 # Node and Newman output
 node_modules/
 newman/
+
+# Browser automation output (screenshots taken for docs/img)
+.playwright-mcp/
