@@ -60,43 +60,6 @@ Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_
 | SonarQube | Community Build | Quality gate `remit` in the Jenkins pipeline ([CI](#ci)) |
 | Code quality | Spotless 3.10 (google-java-format 1.28), JaCoCo 0.8.15 | Format check and an 80% line coverage gate per module in `./mvnw verify`; OWASP Dependency-Check as an optional report (`-Powasp`) |
 
-## Repository layout
-
-| Path | Contents |
-|---|---|
-| `remit-common/` | Shared event records, enums, topic names, masking utilities |
-| `intake-service/` | SFTP polling and the Spring Batch ingestion job |
-| `routing-service/` | Idempotent Kafka consumer, channel routing, retries and the dead-letter topic |
-| `api-service/` | Operator REST API, security, read model, audit writer |
-| `docker/` | Init scripts for MySQL, MongoDB and Kafka topics used by compose |
-| `docker-compose.yml` | Local stack: infrastructure and the three services |
-| `k8s/` | Kustomize base for the three services, the local overlay with MySQL, MongoDB, Kafka and SFTP, and the kind cluster config ([Kubernetes](#kubernetes-local)) |
-| `*/Dockerfile` | Multi-stage image build of each service |
-| `samples/` | The five sample batch files (see [Intake](#intake-service)) |
-| `scripts/` | Bash ops scripts: build, deploy (compose or kind), restart, seed SFTP, logs, smoke and performance tests, local cluster lifecycle |
-| `postman/` | Postman collection and environments for the operator API ([API tests](#api-tests-postmannewman)) |
-| `Jenkinsfile` | Declarative CI pipeline ([CI](#ci)) |
-| `ci/` | Local Jenkins, Docker-in-Docker and SonarQube stack with its setup script ([ci/README.md](ci/README.md)) |
-| `.github/workflows/ci.yml` | GitHub Actions mirror of the static checks and the build |
-| `docs/api.md` | Operator API reference: endpoints, auth flow, examples, error format |
-| `docs/openapi.json` | OpenAPI document exported by the build |
-| `docs/runbook.md` | Operational procedures (restart a service in compose or Kubernetes, restart a failed batch job, inspect and replay the DLT, rotate the JWT secret and the Kubernetes secrets) |
-| `docs/e2e-expectations.md` | Expected outcome of every sample file |
-| `docs/decisions/` | Architecture decision records |
-
-## Build
-
-Requires JDK 17. The Maven wrapper downloads Maven 3.9.9 on first use.
-
-```bash
-./mvnw -B verify          # compile, unit + integration tests, Spotless check, JaCoCo gate
-./mvnw -B spotless:apply  # reformat Java sources with google-java-format
-./mvnw -B -Powasp verify  # optional OWASP dependency report (target/dependency-check-report.html)
-./mvnw -B sonar:sonar     # SonarQube analysis after verify (-Dsonar.host.url=... -Dsonar.token=...; CI: ci/README.md)
-```
-
-The JaCoCo check fails any module whose line coverage drops below 80%.
-
 ## Quick start
 
 Prerequisites: Docker with Compose v2, Bash (Git Bash works on Windows), `curl` and `jq`. JDK 17 is only needed to build and test outside Docker; the images compile the code themselves.
@@ -142,77 +105,6 @@ Notes:
 - The init scripts in `docker/` run only when a data volume is empty. After changing a password in `.env`, recreate with `docker compose down -v`.
 - The SFTP host key is regenerated whenever the container is recreated, so local clients should not pin it.
 - To run a service from an IDE or with `java -jar` (the "Run it locally" sections below), stop its container first, for example `docker compose stop api-service`; otherwise both hold the same port and share the Kafka consumer group.
-
-### Container images
-
-Each service has a two-stage `Dockerfile` built from the repository root (it needs the parent pom and `remit-common`):
-
-1. `maven:3-eclipse-temurin-17` copies the poms first and resolves dependencies in their own layer, so a code change does not download anything again, then packages the service with `-DskipTests` (tests run in `./mvnw verify` and CI, not in the image build).
-2. `eclipse-temurin:17-jre` receives the Spring Boot layers (`java -Djarmode=tools -jar app.jar extract --layers`, the Boot 3.3+ successor of `layertools`) as four `COPY` layers: dependencies, loader, snapshot dependencies, application. It runs as uid 10001 with `-XX:MaxRAMPercentage=75`, and `HEALTHCHECK` curls `/actuator/health`. Extra JVM flags go in `JAVA_TOOL_OPTIONS`.
-
-Images are named `remit/<service>:<tag>`; compose uses `REMIT_IMAGE_TAG` (default `latest`) and `scripts/build.sh` tags both the git short SHA and `latest`.
-
-### Scripts
-
-All scripts take `-h` for help, use `set -euo pipefail`, read `.env`, and pass `shellcheck scripts/*.sh` with zero warnings. The Kubernetes ones use the kubectl context `kind-remit` unless `REMIT_KUBE_CONTEXT` names another (empty: the current context).
-
-| Script | What it does |
-|---|---|
-| `scripts/build.sh [--skip-tests]` | `./mvnw -B verify`, then builds the three images tagged with the git short SHA and `latest` |
-| `scripts/deploy.sh compose\|k8s` | `compose`: `docker compose up -d` (`--build` to rebuild) and waits up to 180 s for every service to be healthy, printing each status. `k8s`: runs `scripts/k8s-up.sh` (`--build` passed on) |
-| `scripts/restart.sh <service> [compose\|k8s]` | Restarts one service and waits until it is healthy again (`kubectl rollout restart` and `rollout status` for k8s) |
-| `scripts/seed-sftp.sh [file...]` | Uploads files (default: `samples/*.csv`) to `/inbound`. Default transport streams them into the compose `sftp` container (needs only the docker CLI); `--via kubectl` does the same into the kind cluster's sftp pod; `--via sftp` uses `sftp` and `sshpass` like a real client |
-| `scripts/logs.sh <service> [compose\|k8s]` | Follows a service's JSON logs, pretty-printed with jq (`-c` compact, `--no-follow`, `-n LINES`); `k8s` follows every pod of the deployment |
-| `scripts/gen-batch.sh <clientId> <rows>` | Generates a valid batch file; `-r FORCE_FAIL` makes every row fail in routing |
-| `scripts/smoke-test.sh [--target compose\|k8s]` | End-to-end test of the samples and a dead-letter replay ([Sample walkthrough](#sample-walkthrough)); `--target k8s` runs it against the kind deployment |
-| `scripts/newman.sh [-e local|docker] [--base-url URL]` | Runs the Postman collection with Newman (cli, JUnit and HTML reports in `newman/`) ([API tests](#api-tests-postmannewman)) |
-| `scripts/perf-test.sh` | NFR-05 measurement with a 10,000-row file ([Measured performance](#measured-performance)) |
-| `scripts/k8s-up.sh [--build]` | Creates the kind cluster `remit` if needed, loads the images, creates the Secret, applies the local overlay and waits for every rollout ([Kubernetes](#kubernetes-local)) |
-| `scripts/k8s-down.sh [--keep-cluster]` | Deletes the kind cluster, or with `--keep-cluster` only the `remit` namespace and its volumes |
-| `scripts/k8s-secrets.sh [--restart]` | Creates or updates the `remit-secrets` Secret from `.env` without printing a value; `--restart` rolls the services so they read it |
-| `scripts/lib.sh` | Helpers sourced by the other scripts (`.env` loading, logging, compose and kubectl wrappers, health waits) |
-
-Every file lands in `/inbound` under a hidden `.part` name and is renamed once complete, so the poller never reads a partial upload.
-
-## Kubernetes (local)
-
-`k8s/` holds kustomize manifests, verified on a local [kind](https://kind.sigs.k8s.io/) cluster:
-
-- `k8s/base`: namespace `remit`, a Deployment and ClusterIP Service per service (routing-service with 2 replicas and a PodDisruptionBudget), the shared ConfigMap `remit-config` (`SPRING_PROFILES_ACTIVE=k8s`), CPU and memory requests and limits (250m/512Mi to 1 CPU/1Gi), startup, liveness (`/actuator/health/liveness`) and readiness (`/actuator/health/readiness`) probes, and a restricted security context: uid 10001, non-root, read-only root file system with `emptyDir` volumes for `/tmp` and intake's `/staging`, no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp. Each service reads only the keys of the Secret `remit-secrets` it needs; `k8s/base/secret.example.yaml` documents the keys with placeholders, and `scripts/k8s-secrets.sh` creates the real Secret from `.env`.
-- `k8s/overlays/local`: the base plus `infra/` (MySQL 8.4, MongoDB 7 and a single-node KRaft Kafka 3.9 as one-replica StatefulSets, SFTP as a Deployment, small volumes from kind's default StorageClass, a `kafka-init` Job for the topics; no operators). The init scripts are the ones compose uses (`docker/`), turned into ConfigMaps, so the overlay is rendered with `kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/overlays/local` (a plain `kubectl apply -k` refuses files outside the overlay). The overlay also sets the compose demo values: SFTP poll every 10 s, business date 2026-10-15, chaos hook on, seeded operator and admin users.
-- `k8s/kind-config.yaml`: one node, node port 30080 published on `127.0.0.1:8080`.
-
-**Exposure:** api-service is a `NodePort` Service (30080) in the local overlay, and the kind config maps that port to `localhost:8080`, so the API, Swagger UI, the smoke test and Newman use the same URL as compose. The alternative, for a cluster without the port mapping, is `kubectl -n remit port-forward svc/api-service 8080:8080`. [ADR 0013](docs/decisions/0013-kubernetes-local-overlay.md) explains these choices.
-
-Prerequisites: Docker, [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation), kubectl, Bash, `curl`, `jq`, and a filled `.env`. Port 8080 must be free: stop the compose stack first (`docker compose down`).
-
-```bash
-scripts/k8s-up.sh                        # or: scripts/deploy.sh k8s
-kubectl -n remit get pods                # all Running, kafka-init Completed
-scripts/smoke-test.sh --target k8s       # 70 checks against http://localhost:8080
-scripts/restart.sh routing-service k8s   # rollout restart and wait
-scripts/logs.sh api-service k8s          # JSON logs of every api-service pod
-scripts/k8s-down.sh                      # delete the cluster (--keep-cluster: only the namespace)
-```
-
-`k8s-up.sh` is safe to rerun. It creates the cluster if it is missing, builds the images if they do not exist (`--build` forces a rebuild with `scripts/build.sh --skip-tests`), loads them into the node with `kind load docker-image` (skipped when the node already has that image ID; a service whose image changed is restarted), applies the namespace, the Secret and the overlay, then waits for MySQL, MongoDB, Kafka, SFTP, the `kafka-init` Job and the three deployments, and prints the pods. The services start in order without crash loops: each waits in an init container until its dependencies accept connections.
-
-`smoke-test.sh --target k8s` never deploys or tears down: it uses the running cluster, uploads the samples with `kubectl exec` into the sftp pod (`seed-sftp.sh --via kubectl`) and checks the SFTP directories the same way. The samples are accepted once per database, so reset the data between runs with `scripts/k8s-down.sh --keep-cluster && scripts/k8s-up.sh` (about 1.5 minutes, the images stay loaded). `scripts/newman.sh` runs the Postman collection against the cluster unchanged. Pods read `remit-config` and `remit-secrets` at startup only; after changing either, restart the services (`scripts/k8s-secrets.sh --restart`, see the [runbook](docs/runbook.md#rotate-secrets-in-kubernetes)).
-
-Verified on 2026-09-30 with kind v0.33.0, kubectl client v1.34.1 (kustomize v5.7.1), node image `kindest/node:v1.37.0` (pinned by digest in `k8s/kind-config.yaml`), Docker Desktop 29.5.2 on Windows 11 (WSL 2, 11.7 GiB for the Docker VM, 20 CPUs), Git Bash:
-
-| Step (from no cluster, node image already pulled) | Time |
-|---|---|
-| `kind create cluster` | 49 s |
-| `kind load docker-image` of the three images (about 600 MB each) | 43 s (12 to 15 s each) |
-| Infrastructure ready and topics created (the node pulls mysql, mongo, kafka and sftp) | 76 s |
-| Services ready | 35 s |
-| **`scripts/k8s-up.sh` total** | **210 s** |
-| `scripts/smoke-test.sh --target k8s` | 53 s, 70 of 70 checks passed (samples settled 8 s after the upload) |
-| `scripts/restart.sh routing-service k8s` | 52 s |
-| `scripts/k8s-down.sh` | 7 s |
-
-The very first run also downloaded the node image (cluster creation 73 s, total 293 s). A rerun against a running cluster takes about 35 s. kubectl 1.34 warns that it is more than one minor version from the 1.37 server; every command above worked, and a kubectl of 1.36 or newer avoids the warning. Newman against the cluster: 98 requests, 687 assertions, 0 failures.
 
 ## Sample walkthrough
 
@@ -261,7 +153,11 @@ api-service serves the operator API under `/api/v1` on port 8080. Swagger UI is 
 
 Lists are paged (`page`, `size` up to 100, larger sizes are clamped to 100, `sort`) and return `{content, page, size, totalElements, totalPages}`. Every error is an RFC 7807 ProblemDetail without stack traces: 400 with field errors, 401 without a valid token, 403 for the wrong role, 404, 409 for a refused replay, 429 for a locked login.
 
-## intake-service
+## Services
+
+Each service in detail: what it does, its configuration, and how to run it outside compose. [docs/architecture.md](docs/architecture.md) follows one instruction through all three.
+
+### intake-service
 
 intake-service polls the SFTP `/inbound` directory every `REMIT_SFTP_POLL_INTERVAL` (default 30 s). Each `.csv` file is downloaded to a local staging directory, moved to `/processing`, and run through the Spring Batch job `ingestPaymentFileJob`:
 
@@ -273,7 +169,7 @@ Afterwards the remote file moves to `/processed`, or to `/error` next to a `<fil
 
 Every event carries the headers `eventId`, `eventType`, `occurredAt`, `correlationId` (the batch id) and `schemaVersion`. Logs are JSON with `service`, `correlationId` and `fileName`; account numbers only ever appear masked to their last four digits.
 
-### File format
+#### File format
 
 File name `PAY_<CLIENTID>_<yyyyMMddHHmmss>.csv`, `CLIENTID` being 3 to 10 upper-case letters or digits. UTF-8, comma separated with RFC 4180 quoting, a fixed header line and a trailer `TRAILER,<record_count>,<control_total>`:
 
@@ -297,7 +193,7 @@ Channel rules, configured under `remit.routing.rules`: INTERAC is CAD only and a
 
 The instruction idempotency key is `SHA-256(clientId + "|" + instruction_ref)`, so the same reference from the same client is a duplicate in any file, while two clients may use the same reference.
 
-### Sample files
+#### Sample files
 
 | File | Content | Expected result |
 |---|---|---|
@@ -309,7 +205,7 @@ The instruction idempotency key is `SHA-256(clientId + "|" + instruction_ref)`, 
 
 Row-by-row expectations, including what routing-service should do with each instruction, are in [docs/e2e-expectations.md](docs/e2e-expectations.md). The valid rows use value date 2026-10-15, so with the real clock the samples are accepted from 2026-09-15 to 2026-10-15. On any other date set `REMIT_CLOCK_FIXED_DATE=2026-10-15`, which pins the business date for a demo ([ADR 0005](docs/decisions/0005-demo-clock.md)); the integration tests always run with that date.
 
-### Run it locally
+#### Run it locally
 
 With the compose infrastructure up and `.env` filled in:
 
@@ -323,7 +219,7 @@ curl -s localhost:8081/actuator/health/readiness
 curl -s localhost:8081/actuator/ingestjobs      # recent job executions
 ```
 
-### Generate a large file
+#### Generate a large file
 
 ```bash
 scripts/gen-batch.sh -o /tmp ACME01 10000     # prints /tmp/PAY_ACME01_<timestamp>.csv
@@ -333,11 +229,11 @@ scripts/gen-batch.sh -r FORCE_FAIL CHAOS01 1  # every row fails in routing-servi
 
 The script writes a valid file with rows spread over the three channels within their limits and a control total summed in integer cents. The value date is `VALUE_DATE` if set, else `REMIT_CLOCK_FIXED_DATE` if set (compose pins 2026-10-15, where tomorrow's real date would be in the past), else tomorrow in America/Toronto. `-r TEXT` sets the remittance info of every row. Run `scripts/gen-batch.sh -h` for all options. It needs GNU or BSD `date` with time zone data.
 
-## routing-service
+### routing-service
 
 routing-service consumes `payments.instructions` and routes each instruction to `payments.routed.eft`, `payments.routed.wire` or `payments.routed.interac`, exactly once in effect however often it is delivered.
 
-### Consumer settings
+#### Consumer settings
 
 | Setting | Value |
 |---|---|
@@ -347,7 +243,7 @@ routing-service consumes `payments.instructions` and routes each instruction to 
 | Deserializer | `ErrorHandlingDeserializer` around `JsonDeserializer<PaymentInstruction>`, type headers trusted only from `ca.musakaleem.remit.common.event` |
 | Producer | `acks=all`, `enable.idempotence=true`, JSON values, every send awaited (`send(...).get(timeout)`) |
 
-### Algorithm (FR-RTE-02)
+#### Algorithm (FR-RTE-02)
 
 1. Insert a `processed_instruction` row with status `ROUTING` in its own transaction. The primary key is the idempotency key.
 2. If the key already exists: a `ROUTED` or `REQUIRES_REVIEW` row means this is a duplicate, so publish a `DUPLICATE` status event and stop. A `ROUTING` row means an earlier attempt failed or crashed, so count the attempt and carry on.
@@ -358,15 +254,15 @@ routing-service consumes `payments.instructions` and routes each instruction to 
 
 Every routed record and status event carries the five standard headers; routed records also carry `routingStatus` (`ROUTED` or `REQUIRES_REVIEW`). Logs are JSON with `service`, `correlationId` and `idempotencyKey`; the debtor account appears only masked.
 
-### Retries and the dead-letter topic
+#### Retries and the dead-letter topic
 
 A failing record is retried with exponential back-off (1 s, then 2 s: three attempts in total) and then published to `payments.instructions.DLT` on the same partition, with its original key, value and headers plus Spring's `kafka_dlt-*` exception and origin headers. A `DEAD_LETTERED` status event with the failure reason follows. A channel rule violation (`NonRetryableRoutingException`) and a record that cannot be deserialized (a poison pill) skip the retries, and a poison pill never blocks the records behind it. api-service replays dead letters by republishing them with `replayCount + 1`, at most three times. See [ADR 0003](docs/decisions/0003-dlt-and-replay.md) and [Inspect the DLT](docs/runbook.md#inspect-the-dlt).
 
-### Chaos hook (FR-RTE-04)
+#### Chaos hook (FR-RTE-04)
 
 With `remit.routing.chaos-enabled=true` an instruction whose `remittance_info` is exactly `FORCE_FAIL` fails every attempt with a retryable error, so it lands on the DLT after three attempts. It is on in the `local` and `docker` profiles for demos and off by default and in `k8s`. The local Kubernetes overlay turns it on through its ConfigMap (`REMIT_ROUTING_CHAOSENABLED=true`, Spring's environment form of the property), so the smoke test's dead-letter cycle also runs on kind; the base manifests leave it off.
 
-### Run it locally
+#### Run it locally
 
 With the compose infrastructure up and `.env` filled in:
 
@@ -380,13 +276,13 @@ curl -s localhost:8082/actuator/health    # db and kafka components, both UP
 
 Run intake-service next to it and drop a sample file (see above); `docs/e2e-expectations.md` lists the routing outcome of every sample instruction.
 
-## api-service
+### api-service
 
 api-service gives operators a JWT-secured REST API over a read model it builds from Kafka, writes an append-only audit trail to MongoDB, and replays dead letters. The full reference, with curl examples, is [docs/api.md](docs/api.md); Swagger UI runs at `http://localhost:8080/swagger-ui.html`.
 
 The endpoint table is in [API summary](#api-summary).
 
-### Security
+#### Security
 
 - `POST /auth/login` returns an HS256 JWT (jjwt) valid for 15 minutes with claims `sub`, `roles`, `iat`, `exp`, `jti`. The key is `REMIT_JWT_SECRET`; api-service does not start without one of at least 32 bytes.
 - Stateless filter chain; roles are checked per endpoint with `@PreAuthorize`. Users live in MySQL with BCrypt hashes.
@@ -396,19 +292,19 @@ The endpoint table is in [API summary](#api-summary).
 
 [ADR 0004](docs/decisions/0004-jwt-approach.md) explains the choices.
 
-### Read model
+#### Read model
 
 Consumer group `api-service` reads `payments.batch-events`, `payments.status-events`, `payments.rejected`, `payments.instructions.DLT` (as raw bytes, since a poison pill is not JSON) and the three `payments.routed.*` topics (for the payment details of routed instructions) into schema `remit_api`, with one consumer thread per partition (three) for each topic. Upserts are keyed by natural key and ignore events that happened strictly before the stored state, so redelivery and reordering are harmless; a duplicate delivery never downgrades an instruction but is kept in its status history. Dead letters are deduplicated by original topic, partition and offset. See [ADR 0010](docs/decisions/0010-api-read-model.md).
 
-### Audit trail
+#### Audit trail
 
 Every consumed record and every operator action (login, replay) writes one document to `remit_audit.audit_events`, with actor `system:api-service` or `user:<username>`. The unique index on `eventId` makes a redelivered event a no-op; the code only ever inserts (`MongoTemplate.insert`), and the compose MongoDB user may only find and insert. Types and ids: [ADR 0009](docs/decisions/0009-audit-event-types.md).
 
-### Replay
+#### Replay
 
 `POST /api/v1/dead-letters/{id}/replay` (ADMIN) republishes the stored instruction to `payments.instructions` with `replayCount + 1`, keyed by debtor account with the five standard headers, marks the dead letter `REPLAY_REQUESTED` and audits `DLT_REPLAY_REQUESTED` with the administrator's name. routing-service's status events then mark it `REPLAYED`, or `PENDING` again if it failed. A replay is refused with 409 while one is pending and once a dead letter has been replayed 3 times (it becomes `EXHAUSTED`). Walkthrough: [Replay a DLT message](docs/runbook.md#replay-a-dlt-message).
 
-### Run it locally
+#### Run it locally
 
 With the compose infrastructure up and `.env` filled in:
 
@@ -424,6 +320,28 @@ curl -s localhost:8080/api/v1/stats/summary -H "Authorization: Bearer $TOKEN"
 ```
 
 Run intake-service and routing-service next to it and drop the samples; [docs/e2e-expectations.md](docs/e2e-expectations.md) lists what the API should then report. The build (`./mvnw -B verify`) regenerates [docs/openapi.json](docs/openapi.json) from the running application.
+
+## Build
+
+Requires JDK 17. The Maven wrapper downloads Maven 3.9.9 on first use.
+
+```bash
+./mvnw -B verify          # compile, unit + integration tests, Spotless check, JaCoCo gate
+./mvnw -B spotless:apply  # reformat Java sources with google-java-format
+./mvnw -B -Powasp verify  # optional OWASP dependency report (target/dependency-check-report.html)
+./mvnw -B sonar:sonar     # SonarQube analysis after verify (-Dsonar.host.url=... -Dsonar.token=...; CI: ci/README.md)
+```
+
+The JaCoCo check fails any module whose line coverage drops below 80%.
+
+### Container images
+
+Each service has a two-stage `Dockerfile` built from the repository root (it needs the parent pom and `remit-common`):
+
+1. `maven:3-eclipse-temurin-17` copies the poms first and resolves dependencies in their own layer, so a code change does not download anything again, then packages the service with `-DskipTests` (tests run in `./mvnw verify` and CI, not in the image build).
+2. `eclipse-temurin:17-jre` receives the Spring Boot layers (`java -Djarmode=tools -jar app.jar extract --layers`, the Boot 3.3+ successor of `layertools`) as four `COPY` layers: dependencies, loader, snapshot dependencies, application. It runs as uid 10001 with `-XX:MaxRAMPercentage=75`, and `HEALTHCHECK` curls `/actuator/health`. Extra JVM flags go in `JAVA_TOOL_OPTIONS`.
+
+Images are named `remit/<service>:<tag>`; compose uses `REMIT_IMAGE_TAG` (default `latest`) and `scripts/build.sh` tags both the git short SHA and `latest`.
 
 ## Testing
 
@@ -514,6 +432,46 @@ SonarQube after that run: quality gate **Passed**, coverage 96.8% (lines 98.1%, 
 
 ![SonarQube quality gate remit and its conditions](docs/img/sonarqube-quality-gate.png)
 
+## Kubernetes (local)
+
+`k8s/` holds kustomize manifests, verified on a local [kind](https://kind.sigs.k8s.io/) cluster:
+
+- `k8s/base`: namespace `remit`, a Deployment and ClusterIP Service per service (routing-service with 2 replicas and a PodDisruptionBudget), the shared ConfigMap `remit-config` (`SPRING_PROFILES_ACTIVE=k8s`), CPU and memory requests and limits (250m/512Mi to 1 CPU/1Gi), startup, liveness (`/actuator/health/liveness`) and readiness (`/actuator/health/readiness`) probes, and a restricted security context: uid 10001, non-root, read-only root file system with `emptyDir` volumes for `/tmp` and intake's `/staging`, no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp. Each service reads only the keys of the Secret `remit-secrets` it needs; `k8s/base/secret.example.yaml` documents the keys with placeholders, and `scripts/k8s-secrets.sh` creates the real Secret from `.env`.
+- `k8s/overlays/local`: the base plus `infra/` (MySQL 8.4, MongoDB 7 and a single-node KRaft Kafka 3.9 as one-replica StatefulSets, SFTP as a Deployment, small volumes from kind's default StorageClass, a `kafka-init` Job for the topics; no operators). The init scripts are the ones compose uses (`docker/`), turned into ConfigMaps, so the overlay is rendered with `kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/overlays/local` (a plain `kubectl apply -k` refuses files outside the overlay). The overlay also sets the compose demo values: SFTP poll every 10 s, business date 2026-10-15, chaos hook on, seeded operator and admin users.
+- `k8s/kind-config.yaml`: one node, node port 30080 published on `127.0.0.1:8080`.
+
+**Exposure:** api-service is a `NodePort` Service (30080) in the local overlay, and the kind config maps that port to `localhost:8080`, so the API, Swagger UI, the smoke test and Newman use the same URL as compose. The alternative, for a cluster without the port mapping, is `kubectl -n remit port-forward svc/api-service 8080:8080`. [ADR 0013](docs/decisions/0013-kubernetes-local-overlay.md) explains these choices.
+
+Prerequisites: Docker, [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation), kubectl, Bash, `curl`, `jq`, and a filled `.env`. Port 8080 must be free: stop the compose stack first (`docker compose down`).
+
+```bash
+scripts/k8s-up.sh                        # or: scripts/deploy.sh k8s
+kubectl -n remit get pods                # all Running, kafka-init Completed
+scripts/smoke-test.sh --target k8s       # 70 checks against http://localhost:8080
+scripts/restart.sh routing-service k8s   # rollout restart and wait
+scripts/logs.sh api-service k8s          # JSON logs of every api-service pod
+scripts/k8s-down.sh                      # delete the cluster (--keep-cluster: only the namespace)
+```
+
+`k8s-up.sh` is safe to rerun. It creates the cluster if it is missing, builds the images if they do not exist (`--build` forces a rebuild with `scripts/build.sh --skip-tests`), loads them into the node with `kind load docker-image` (skipped when the node already has that image ID; a service whose image changed is restarted), applies the namespace, the Secret and the overlay, then waits for MySQL, MongoDB, Kafka, SFTP, the `kafka-init` Job and the three deployments, and prints the pods. The services start in order without crash loops: each waits in an init container until its dependencies accept connections.
+
+`smoke-test.sh --target k8s` never deploys or tears down: it uses the running cluster, uploads the samples with `kubectl exec` into the sftp pod (`seed-sftp.sh --via kubectl`) and checks the SFTP directories the same way. The samples are accepted once per database, so reset the data between runs with `scripts/k8s-down.sh --keep-cluster && scripts/k8s-up.sh` (about 1.5 minutes, the images stay loaded). `scripts/newman.sh` runs the Postman collection against the cluster unchanged. Pods read `remit-config` and `remit-secrets` at startup only; after changing either, restart the services (`scripts/k8s-secrets.sh --restart`, see the [runbook](docs/runbook.md#rotate-secrets-in-kubernetes)).
+
+Verified on 2026-09-30 with kind v0.33.0, kubectl client v1.34.1 (kustomize v5.7.1), node image `kindest/node:v1.37.0` (pinned by digest in `k8s/kind-config.yaml`), Docker Desktop 29.5.2 on Windows 11 (WSL 2, 11.7 GiB for the Docker VM, 20 CPUs), Git Bash:
+
+| Step (from no cluster, node image already pulled) | Time |
+|---|---|
+| `kind create cluster` | 49 s |
+| `kind load docker-image` of the three images (about 600 MB each) | 43 s (12 to 15 s each) |
+| Infrastructure ready and topics created (the node pulls mysql, mongo, kafka and sftp) | 76 s |
+| Services ready | 35 s |
+| **`scripts/k8s-up.sh` total** | **210 s** |
+| `scripts/smoke-test.sh --target k8s` | 53 s, 70 of 70 checks passed (samples settled 8 s after the upload) |
+| `scripts/restart.sh routing-service k8s` | 52 s |
+| `scripts/k8s-down.sh` | 7 s |
+
+The very first run also downloaded the node image (cluster creation 73 s, total 293 s). A rerun against a running cluster takes about 35 s. kubectl 1.34 warns that it is more than one minor version from the 1.37 server; every command above worked, and a kubectl of 1.36 or newer avoids the warning. Newman against the cluster: 98 requests, 687 assertions, 0 failures.
+
 ## Measured performance
 
 NFR-05 asks that a 10,000-row valid file goes from the SFTP drop to all instructions `ROUTED` in under 60 s on a local compose stack. Measured with `scripts/perf-test.sh --runs 3`: it generates a 10,000-row file with `gen-batch.sh`, takes the start time right before uploading it to `/inbound`, and stops when `GET /api/v1/batches/{id}` reports `ROUTED + REQUIRES_REVIEW = 10000` (polled every 0.5 s). The figure therefore includes the wait for the next SFTP poll, the intake job, routing, and api-service catching up with the status events.
@@ -537,6 +495,28 @@ Tuning, starting from the first measurement (one run each unless noted):
 | SFTP poll interval 30 s to 10 s (compose only) | median 32.5 s (six runs above) | the poll wait no longer decides whether a run meets the target |
 
 Also tried without a measurable gain: turning off the MySQL binary log. Deliberately unchanged: routing-service still awaits every publish and commits twice per instruction ([ADR 0002](docs/decisions/0002-idempotency.md)), topics keep 3 partitions (so 3 routing threads), and the intake chunk size stays 100.
+
+## Scripts
+
+All scripts take `-h` for help, use `set -euo pipefail`, read `.env`, and pass `shellcheck scripts/*.sh` with zero warnings. The Kubernetes ones use the kubectl context `kind-remit` unless `REMIT_KUBE_CONTEXT` names another (empty: the current context).
+
+| Script | What it does |
+|---|---|
+| `scripts/build.sh [--skip-tests]` | `./mvnw -B verify`, then builds the three images tagged with the git short SHA and `latest` |
+| `scripts/deploy.sh compose\|k8s` | `compose`: `docker compose up -d` (`--build` to rebuild) and waits up to 180 s for every service to be healthy, printing each status. `k8s`: runs `scripts/k8s-up.sh` (`--build` passed on) |
+| `scripts/restart.sh <service> [compose\|k8s]` | Restarts one service and waits until it is healthy again (`kubectl rollout restart` and `rollout status` for k8s) |
+| `scripts/seed-sftp.sh [file...]` | Uploads files (default: `samples/*.csv`) to `/inbound`. Default transport streams them into the compose `sftp` container (needs only the docker CLI); `--via kubectl` does the same into the kind cluster's sftp pod; `--via sftp` uses `sftp` and `sshpass` like a real client |
+| `scripts/logs.sh <service> [compose\|k8s]` | Follows a service's JSON logs, pretty-printed with jq (`-c` compact, `--no-follow`, `-n LINES`); `k8s` follows every pod of the deployment |
+| `scripts/gen-batch.sh <clientId> <rows>` | Generates a valid batch file; `-r FORCE_FAIL` makes every row fail in routing |
+| `scripts/smoke-test.sh [--target compose\|k8s]` | End-to-end test of the samples and a dead-letter replay ([Sample walkthrough](#sample-walkthrough)); `--target k8s` runs it against the kind deployment |
+| `scripts/newman.sh [-e local|docker] [--base-url URL]` | Runs the Postman collection with Newman (cli, JUnit and HTML reports in `newman/`) ([API tests](#api-tests-postmannewman)) |
+| `scripts/perf-test.sh` | NFR-05 measurement with a 10,000-row file ([Measured performance](#measured-performance)) |
+| `scripts/k8s-up.sh [--build]` | Creates the kind cluster `remit` if needed, loads the images, creates the Secret, applies the local overlay and waits for every rollout ([Kubernetes](#kubernetes-local)) |
+| `scripts/k8s-down.sh [--keep-cluster]` | Deletes the kind cluster, or with `--keep-cluster` only the `remit` namespace and its volumes |
+| `scripts/k8s-secrets.sh [--restart]` | Creates or updates the `remit-secrets` Secret from `.env` without printing a value; `--restart` rolls the services so they read it |
+| `scripts/lib.sh` | Helpers sourced by the other scripts (`.env` loading, logging, compose and kubectl wrappers, health waits) |
+
+Every file lands in `/inbound` under a hidden `.part` name and is renamed once complete, so the poller never reads a partial upload.
 
 ## Design decisions
 
@@ -567,6 +547,30 @@ The decisions behind the code are recorded as ADRs in [docs/decisions/](docs/dec
 - [inspect the DLT](docs/runbook.md#inspect-the-dlt) and [replay a DLT message](docs/runbook.md#replay-a-dlt-message)
 - [rotate the JWT secret](docs/runbook.md#rotate-the-jwt-secret) and [other secrets](docs/runbook.md#rotate-other-secrets)
 - [reset the local stack](docs/runbook.md#reset-the-local-stack), [common failure signatures](docs/runbook.md#common-failure-signatures) and [login lockout recovery](docs/runbook.md#recover-from-a-login-lockout)
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `remit-common/` | Shared event records, enums, topic names, masking utilities |
+| `intake-service/` | SFTP polling and the Spring Batch ingestion job |
+| `routing-service/` | Idempotent Kafka consumer, channel routing, retries and the dead-letter topic |
+| `api-service/` | Operator REST API, security, read model, audit writer |
+| `docker/` | Init scripts for MySQL, MongoDB and Kafka topics used by compose |
+| `docker-compose.yml` | Local stack: infrastructure and the three services |
+| `k8s/` | Kustomize base for the three services, the local overlay with MySQL, MongoDB, Kafka and SFTP, and the kind cluster config ([Kubernetes](#kubernetes-local)) |
+| `*/Dockerfile` | Multi-stage image build of each service |
+| `samples/` | The five sample batch files (see [Intake](#intake-service)) |
+| `scripts/` | Bash ops scripts: build, deploy (compose or kind), restart, seed SFTP, logs, smoke and performance tests, local cluster lifecycle |
+| `postman/` | Postman collection and environments for the operator API ([API tests](#api-tests-postmannewman)) |
+| `Jenkinsfile` | Declarative CI pipeline ([CI](#ci)) |
+| `ci/` | Local Jenkins, Docker-in-Docker and SonarQube stack with its setup script ([ci/README.md](ci/README.md)) |
+| `.github/workflows/ci.yml` | GitHub Actions mirror of the static checks and the build |
+| `docs/api.md` | Operator API reference: endpoints, auth flow, examples, error format |
+| `docs/openapi.json` | OpenAPI document exported by the build |
+| `docs/runbook.md` | Operational procedures (restart a service in compose or Kubernetes, restart a failed batch job, inspect and replay the DLT, rotate the JWT secret and the Kubernetes secrets) |
+| `docs/e2e-expectations.md` | Expected outcome of every sample file |
+| `docs/decisions/` | Architecture decision records |
 
 ## Illustrative limits
 
