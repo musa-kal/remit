@@ -245,6 +245,22 @@ curl -s "localhost:8080/api/v1/dead-letters?status=PENDING" -H "Authorization: B
 
 After three attempts (about 3 s) the instruction is `DEAD_LETTERED` and a `PENDING` dead letter appears. A replay by `admin` (`POST /api/v1/dead-letters/{id}/replay`) answers 202, a second one while it is pending 409; the replay fails again because the hook is still on, the dead letter returns to `PENDING` with `replayCount` 1, and after the third replay it is `EXHAUSTED`. See [Replay a DLT message](docs/runbook.md#replay-a-dlt-message).
 
+## API summary
+
+api-service serves the operator API under `/api/v1` on port 8080. Swagger UI is at <http://localhost:8080/swagger-ui.html> (bearer auth configured; log in first and use **Authorize**), the OpenAPI document at `/v3/api-docs`, and the build exports the same document to [docs/openapi.json](docs/openapi.json). The full reference with curl examples, paging, filters and error bodies is [docs/api.md](docs/api.md).
+
+| Method | Path | Role |
+|---|---|---|
+| POST | `/auth/login` | public |
+| GET | `/batches`, `/batches/{batchId}`, `/batches/{batchId}/instructions`, `/batches/{batchId}/rejections` | OPERATOR |
+| GET | `/instructions/{idempotencyKey}` | OPERATOR (full account numbers for ADMIN only) |
+| GET | `/dead-letters` | OPERATOR |
+| POST | `/dead-letters/{id}/replay` | ADMIN |
+| GET | `/audit-events` | ADMIN |
+| GET | `/stats/summary` | OPERATOR |
+
+Lists are paged (`page`, `size` up to 100, larger sizes are clamped to 100, `sort`) and return `{content, page, size, totalElements, totalPages}`. Every error is an RFC 7807 ProblemDetail without stack traces: 400 with field errors, 401 without a valid token, 403 for the wrong role, 404, 409 for a refused replay, 429 for a locked login.
+
 ## intake-service
 
 intake-service polls the SFTP `/inbound` directory every `REMIT_SFTP_POLL_INTERVAL` (default 30 s). Each `.csv` file is downloaded to a local staging directory, moved to `/processing`, and run through the Spring Batch job `ingestPaymentFileJob`:
@@ -368,19 +384,7 @@ Run intake-service next to it and drop a sample file (see above); `docs/e2e-expe
 
 api-service gives operators a JWT-secured REST API over a read model it builds from Kafka, writes an append-only audit trail to MongoDB, and replays dead letters. The full reference, with curl examples, is [docs/api.md](docs/api.md); Swagger UI runs at `http://localhost:8080/swagger-ui.html`.
 
-### Endpoints (`/api/v1`)
-
-| Method | Path | Role |
-|---|---|---|
-| POST | `/auth/login` | public |
-| GET | `/batches`, `/batches/{batchId}`, `/batches/{batchId}/instructions`, `/batches/{batchId}/rejections` | OPERATOR |
-| GET | `/instructions/{idempotencyKey}` | OPERATOR (full account numbers for ADMIN only) |
-| GET | `/dead-letters` | OPERATOR |
-| POST | `/dead-letters/{id}/replay` | ADMIN |
-| GET | `/audit-events` | ADMIN |
-| GET | `/stats/summary` | OPERATOR |
-
-Lists are paged (`page`, `size` up to 100, larger sizes are clamped to 100, `sort`) and return `{content, page, size, totalElements, totalPages}`. Every error is an RFC 7807 ProblemDetail without stack traces: 400 with field errors, 401 without a valid token, 403 for the wrong role, 404, 409 for a refused replay, 429 for a locked login.
+The endpoint table is in [API summary](#api-summary).
 
 ### Security
 
