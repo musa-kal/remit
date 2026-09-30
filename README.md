@@ -425,7 +425,30 @@ curl -s localhost:8080/api/v1/stats/summary -H "Authorization: Bearer $TOKEN"
 
 Run intake-service and routing-service next to it and drop the samples; [docs/e2e-expectations.md](docs/e2e-expectations.md) lists what the API should then report. The build (`./mvnw -B verify`) regenerates [docs/openapi.json](docs/openapi.json) from the running application.
 
-## API tests (Postman/Newman)
+## Testing
+
+Four layers, all run by the Jenkins pipeline:
+
+| Layer | Tool | Where | Scope |
+|---|---|---|---|
+| Unit | JUnit 5, Mockito, AssertJ (surefire, `*Test`) | `*/src/test/java` | Field and channel rules (parameterized, positive and negative), file name, trailer and control total parsing, idempotency keys, masking, routing decisions and the duplicate branches, JWT issue and parse, replay rules |
+| Integration | Testcontainers MySQL, Kafka, MongoDB and `atmoz/sftp`, `spring-batch-test`, MockMvc (failsafe, `*IT`) | `*/src/test/java` | The batch job on every sample file, job restarts, the SFTP poller, Flyway on an empty MySQL, routing duplicates, DLT after 3 attempts and poison pills, every endpoint without a token (401), with the wrong role (403) and the right one (200), the replay cap (409), audit documents, the OpenAPI export |
+| End to end | `scripts/smoke-test.sh` | the compose stack or the kind cluster | The five samples through SFTP, intake, routing and the API, plus one dead-letter replay cycle: 70 checks against [docs/e2e-expectations.md](docs/e2e-expectations.md) |
+| API | Postman collection with Newman | the running stack | 98 requests and 687 assertions on status codes, JSON schemas, values and security negatives ([API tests](#api-tests-postmannewman)) |
+
+Test counts from `./mvnw -B verify` on 2026-09-30 (0 failures, 0 errors, 0 skipped), with JaCoCo coverage of unit and integration tests together:
+
+| Module | Unit tests (classes) | Integration tests (classes) | Line coverage | Branch coverage |
+|---|---|---|---|---|
+| `remit-common` | 55 (6) | 0 | 97.6% | 100.0% |
+| `intake-service` | 237 (18) | 18 (5) | 98.9% | 95.7% |
+| `routing-service` | 101 (12) | 16 (4) | 100.0% | 98.6% |
+| `api-service` | 118 (15) | 86 (9) | 97.2% | 87.3% |
+| **Total** | **511** | **120** | | |
+
+631 tests in total; `./mvnw -B verify` took 6 min 24 s on the machine described under [Measured performance](#measured-performance), most of it container start-up. The build fails if any module drops below 80% line coverage. The smoke test and Newman figures are from the runs recorded under [Kubernetes](#kubernetes-local) and [CI](#ci).
+
+### API tests (Postman/Newman)
 
 [postman/remit.postman_collection.json](postman/remit.postman_collection.json) is a Postman collection (v2.1) for the operator API, with the folders Auth, Batches, Stats, Instructions, Dead Letters, Audit and Security Negative Cases. Every request asserts the status code, the response shape (`pm.response.to.have.jsonSchema` with inline schemas) and the values in [docs/e2e-expectations.md](docs/e2e-expectations.md): batch statuses and counts per file, the rejected rows with their reason codes and line numbers, the history of the duplicate `ACME-0003`, masked accounts for `operator` and full ones for `admin`, the stats summary, and the audit documents. It also covers paging (`size=101` is clamped to 100), filters, 400 validation errors, 404s, and the security negatives: no token, a malformed token, tokens forged with a wrong secret (one expired, one with admin claims), `alg: none`, an operator on ADMIN-only endpoints (403) and a login with an unknown user (401, audited).
 
