@@ -466,6 +466,26 @@ Search the JSON logs (`scripts/logs.sh -n all --no-follow <service>`) for these 
 | any | Flyway `Validate failed: Migrations have failed validation` | An applied migration was edited | Never edit an applied migration; reset the local stack |
 | api | `Command failed with error 18 (AuthenticationFailed)` (MongoDB driver) | `REMIT_MONGO_PASSWORD` does not match the `remit_audit` user | As for the MySQL passwords above |
 
+## Recover from a login lockout
+
+Five failed logins for one username within 10 minutes lock that username for 10 minutes (FR-SEC-06). While it is locked, `POST /api/v1/auth/login` answers 429 `Too many failed logins; try again later` with a `Retry-After` header in seconds, even for the right password, and audits `LOGIN_FAILURE` with reason `LOCKED`. Unknown usernames are counted and locked the same way.
+
+1. Find out who and why, as an ADMIN whose own username is not locked:
+
+   ```bash
+   curl -s "localhost:8080/api/v1/audit-events?entityId=operator&eventType=LOGIN_FAILURE" \
+     -H "Authorization: Bearer $TOKEN" | jq '.content[] | {occurredAt, details}'
+   ```
+
+   Many `BAD_CREDENTIALS` failures from one client usually mean a wrong password in a script or in the Postman environment.
+2. Fix the caller first (the password in `.env`, the Newman `--env-var`, or the Postman current value), or it will lock the username again.
+3. Then wait for `Retry-After` to pass, or clear the lock by restarting api-service. The lock is kept in memory per instance and there is no unlock endpoint, so a restart clears it:
+   - compose: `scripts/restart.sh api-service`
+   - Kubernetes: `scripts/restart.sh api-service k8s` (each replica keeps its own lock; the rollout replaces them all)
+4. In the Postman app, also clear the collection variable `loginBlockedUntil`, which stops the collection from retrying a refused login.
+
+If a password itself is lost: the seeded users are only created when missing, so delete its `app_user_role` rows and then its `app_user` row in `remit_api`, restart api-service, and `UserSeeder` creates the user again from `.env`.
+
 ## Run the CI pipeline and refresh its evidence
 
 The Jenkins pipeline runs on the local CI stack ([ci/README.md](../ci/README.md)).
