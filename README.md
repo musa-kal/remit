@@ -39,17 +39,26 @@ Each service owns its own MySQL schema (`remit_intake`, `remit_routing`, `remit_
 
 ## Stack
 
-- Java 17, Spring Boot 3 (3.5.x), Maven multi-module build
-- Spring Web, Spring Security (JWT, role-based endpoints)
-- Spring Batch for file ingestion
-- Spring Data JPA / Hibernate on MySQL 8, Flyway migrations
-- Apache Kafka 3 (KRaft) with Spring Kafka
-- MongoDB 7 for the audit trail
-- SFTP (atmoz/sftp) as the file drop zone
-- Docker and Docker Compose, Kubernetes manifests (kustomize)
-- Bash ops scripts
-- Jenkins pipeline with JUnit, Postman/Newman and SonarQube
-- JUnit 5, Mockito, AssertJ, Testcontainers; JaCoCo coverage gate and Spotless (google-java-format)
+| Technology | Version | Where it is used |
+|---|---|---|
+| Java | 17 (Temurin) | All modules, compiled with `--release 17`; `eclipse-temurin:17-jre` runtime images |
+| Spring Boot | 3.5.16 | The three services; Maven multi-module build with the Boot parent |
+| Spring Web | Boot 3.5 | api-service REST controllers (`BatchController`, `InstructionController`, `DeadLetterController`, ...), RFC 7807 errors, springdoc Swagger UI |
+| Spring Security | 6 (Boot 3.5) | api-service: stateless filter chain (`SecurityConfig`), JWT bearer filter (`JwtAuthenticationFilter`, jjwt 0.12), `@PreAuthorize` roles OPERATOR and ADMIN, BCrypt users |
+| Spring Batch | 5.2 | intake-service job `ingestPaymentFileJob`: validation tasklet, chunk step with skip policy and skip listener, finalize tasklet, restartable from the last chunk |
+| Spring Data JPA / Hibernate | Boot 3.5 | Entities and repositories in all three services (`FileRegistryEntry`, `ProcessedInstruction` with `@Version`, the api read model); `ddl-auto=validate` |
+| MySQL | 8.4 | One schema per service: `remit_intake`, `remit_routing`, `remit_api`, migrated by Flyway |
+| Apache Kafka | 3.9 (KRaft) | Eight `payments.*` topics; Spring Kafka producers (`acks=all`, idempotence) and consumers (manual ack, `ErrorHandlingDeserializer`, `DefaultErrorHandler` with a dead-letter topic) |
+| MongoDB | 7.0 | api-service audit trail `remit_audit.audit_events`, insert-only (`MongoAuditEventStore`) |
+| SFTP | atmoz/sftp, Spring Integration SFTP | Client drop zone (`/inbound`, `/processing`, `/processed`, `/error`), polled by intake-service through `SftpFileGateway` |
+| Docker | Compose v2 | Two-stage `Dockerfile` per service; `docker-compose.yml` runs the infrastructure and the services |
+| Kubernetes | kustomize, kind | `k8s/base` and `k8s/overlays/local`, verified on kind ([Kubernetes](#kubernetes-local)) |
+| Bash | Git Bash works on Windows | `scripts/`: build, deploy, restart, seed, logs, smoke and performance tests, cluster lifecycle; shellcheck-clean |
+| Jenkins | LTS, JDK 17 | Primary pipeline (`Jenkinsfile`, `ci/`): static checks, tests, SonarQube, images, E2E, Newman |
+| JUnit 5, Mockito, AssertJ, Testcontainers | Boot 3.5 BOM, Testcontainers 1.21 | 631 unit and integration tests against real MySQL, Kafka, MongoDB and SFTP containers ([Testing](#testing)) |
+| Postman / Newman | Collection v2.1 | `postman/remit.postman_collection.json`, run by `scripts/newman.sh` and Jenkins ([API tests](#api-tests-postmannewman)) |
+| SonarQube | Community Build | Quality gate `remit` in the Jenkins pipeline ([CI](#ci)) |
+| Code quality | Spotless 3.10 (google-java-format 1.28), JaCoCo 0.8.15 | Format check and an 80% line coverage gate per module in `./mvnw verify`; OWASP Dependency-Check as an optional report (`-Powasp`) |
 
 ## Repository layout
 
