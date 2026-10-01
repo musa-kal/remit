@@ -107,7 +107,7 @@ Notes:
 
 - The three services run the `docker` profile and wait for healthy MySQL, MongoDB and SFTP and for `kafka-init` to finish. They get only the variables they need from `.env`; the `REMIT_*_HOST` values in `.env` are for services run outside compose.
 - Compose pins the business date to 2026-10-15 (`REMIT_CLOCK_FIXED_DATE`, [ADR 0005](docs/decisions/0005-demo-clock.md)) so the committed samples always validate, polls SFTP every 10 s (`REMIT_SFTP_POLL_INTERVAL`), and turns on the `FORCE_FAIL` chaos hook.
-- MySQL runs with `innodb_flush_log_at_trx_commit=2` and `sync_binlog=0`: a crash can lose the last second of commits, a fair trade for a local stack where per-commit fsyncs made routing about four times slower (see [Measured performance](#measured-performance) and [ADR 0011](docs/decisions/0011-local-stack-settings.md)).
+- MySQL runs with `innodb_flush_log_at_trx_commit=2` and `sync_binlog=0`: a crash can lose the last second of commits, accepted for a local stack because per-commit fsyncs made routing about four times slower (see [Measured performance](#measured-performance) and [ADR 0011](docs/decisions/0011-local-stack-settings.md)).
 - MySQL and MongoDB publish on 3307 and 27018 so they do not clash with native installs; change `REMIT_MYSQL_PORT` / `REMIT_MONGO_PORT` in `.env` if needed.
 - The init scripts in `docker/` run only when a data volume is empty. After changing a password in `.env`, recreate with `docker compose down -v`.
 - The SFTP host key is regenerated whenever the container is recreated, so local clients should not pin it.
