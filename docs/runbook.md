@@ -427,7 +427,7 @@ The samples are accepted once per database (duplicate file detection), so a repe
 
 | Goal | Docker Compose | Kubernetes (kind) |
 |---|---|---|
-| Stop, keep the data | `docker compose down` | `kubectl -n remit scale deployment --all --replicas=0` (scale back with `scripts/k8s-up.sh`) |
+| Stop, keep the data | `docker compose down` | stop the services only: `kubectl -n remit scale deploy/intake-service deploy/routing-service deploy/api-service --replicas=0` (`scripts/k8s-up.sh` applies the manifests and scales them back) |
 | Empty every volume and start again | `docker compose down -v`, then `scripts/deploy.sh compose` | `scripts/k8s-down.sh --keep-cluster`, then `scripts/k8s-up.sh` (about 1.5 minutes, the images stay loaded) |
 | Fresh stack plus the samples, checked | `scripts/smoke-test.sh --reset --keep` | `scripts/k8s-down.sh --keep-cluster && scripts/k8s-up.sh && scripts/smoke-test.sh --target k8s` |
 | Remove everything | `docker compose down -v --rmi local` | `scripts/k8s-down.sh` (deletes the cluster) |
