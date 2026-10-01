@@ -406,20 +406,20 @@ ci/setup.sh    # SonarQube (admin password, quality gate, webhook, token), then 
 docker compose -f ci/docker-compose.jenkins.yml down      # stop; add -v to delete Jenkins, SonarQube and cache volumes
 ```
 
-The [Jenkinsfile](Jenkinsfile) stages, with their durations in the green run shown below (build #5, warm Maven and image caches):
+The [Jenkinsfile](Jenkinsfile) stages, with their durations in the green run shown below (build #7, warm Maven and image caches):
 
 | # | Stage | What it runs | Time |
 |---|---|---|---|
-| 1 | Checkout | `checkout scm` of `main` | 1 s |
-| 2 | Static checks | `./mvnw -B spotless:check`, `shellcheck scripts/*.sh ci/*.sh` | 4 s |
-| 3 | Build and test | `./mvnw -B verify`: 631 unit and Testcontainers integration tests, Spotless, JaCoCo gate; publishes JUnit and JaCoCo | 3 min 23 s |
-| 4 | SonarQube analysis | `withSonarQubeEnv('sonarqube') { ./mvnw -B sonar:sonar }` | 20 s |
-| 5 | Quality gate | `waitForQualityGate abortPipeline: true` within 5 minutes | 4 s |
-| 6 | Docker build | `scripts/build.sh --skip-tests`: three images, all layers cached because no Java or pom changed (8 min 41 s on an empty cache) | 4 s |
-| 7 | E2E | `.env` from credentials, `scripts/deploy.sh compose`, `scripts/smoke-test.sh --no-up` (70 checks) | 1 min 12 s |
-| 8 | API tests | `scripts/newman.sh -e docker --base-url http://dind:8080/api/v1`: 98 requests, 687 assertions; JUnit and htmlextra reports | 14 s |
+| 1 | Checkout | `checkout scm` of `main` (fetched every commit again because the history was rewritten; about 1 s otherwise) | 59 s |
+| 2 | Static checks | `./mvnw -B spotless:check`, `shellcheck scripts/*.sh ci/*.sh` | 6 s |
+| 3 | Build and test | `./mvnw -B verify`: 631 unit and Testcontainers integration tests, Spotless, JaCoCo gate; publishes JUnit and JaCoCo | 3 min 56 s |
+| 4 | SonarQube analysis | `withSonarQubeEnv('sonarqube') { ./mvnw -B sonar:sonar }` | 29 s |
+| 5 | Quality gate | `waitForQualityGate abortPipeline: true` within 5 minutes | 7 s |
+| 6 | Docker build | `scripts/build.sh --skip-tests`: three images; intake and routing fully cached, api-service repackaged on cached Maven dependencies (8 min 41 s on an empty cache) | 23 s |
+| 7 | E2E | `.env` from credentials, `scripts/deploy.sh compose`, `scripts/smoke-test.sh --no-up` (70 checks) | 1 min 16 s |
+| 8 | API tests | `scripts/newman.sh -e docker --base-url http://dind:8080/api/v1`: 98 requests, 687 assertions; JUnit and htmlextra reports | 16 s |
 | | post | compose logs, `docker compose down -v`, archive reports | 4 s |
-| | total | | 5 min 29 s |
+| | total | | 9 min 38 s |
 
 Details:
 
