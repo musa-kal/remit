@@ -371,7 +371,7 @@ Test counts from `./mvnw -B verify` on 2026-09-30 (0 failures, 0 errors, 0 skipp
 | `api-service` | 118 (15) | 86 (9) | 97.2% | 87.3% |
 | **Total** | **511** | **120** | | |
 
-631 tests in total; `./mvnw -B verify` took 6 min 24 s on the machine described under [Measured performance](#measured-performance). The build fails if any module drops below 80% line coverage. The smoke test and Newman figures are from the runs recorded under [Kubernetes](#kubernetes-local) and [CI](#ci).
+631 tests in total; `./mvnw -B verify` took 5 min 35 s (a first run that day 6 min 24 s) on the machine described under [Measured performance](#measured-performance). The build fails if any module drops below 80% line coverage. The smoke test and Newman figures are from the runs recorded under [Kubernetes](#kubernetes-local) and [CI](#ci).
 
 ### API tests (Postman/Newman)
 
